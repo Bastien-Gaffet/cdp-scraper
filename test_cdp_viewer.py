@@ -27,5 +27,23 @@ class TestResoudreDansRacine(unittest.TestCase):
         self.assertIsNone(cdp_viewer.resoudre_dans_racine(self.racine, "PCSI/../../secret.txt"))
 
 
+class TestListerClasses(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.racine = Path(self.tmp.name)
+        (self.racine / "PCSI").mkdir()
+        (self.racine / "MPSI").mkdir()
+        (self.racine / "note.txt").write_text("ignore-moi")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_liste_les_sous_dossiers_tries(self):
+        self.assertEqual(cdp_viewer.lister_classes(self.racine), ["MPSI", "PCSI"])
+
+    def test_racine_absente_renvoie_vide(self):
+        self.assertEqual(cdp_viewer.lister_classes(self.racine / "nexistepas"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
