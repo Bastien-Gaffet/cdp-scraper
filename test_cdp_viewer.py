@@ -116,7 +116,7 @@ class TestServeur(unittest.TestCase):
         maths.mkdir(parents=True)
         (maths / "cours.pdf").write_bytes(b"%PDF-1.4 contenu")
         (maths / "figure.ggb").write_bytes(b"PK\x03\x04 ggb")
-        (maths / "script.py").write_text("print('hello')")
+        (maths / "script.py").write_text("import os\nprint('hello')\n")
         (cls.racine / "secret.txt").write_text("hors classe")
 
         cls.serveur = cdp_viewer.creer_serveur(cls.racine, port=0)
@@ -193,22 +193,27 @@ class TestServeur(unittest.TestCase):
             self.assertEqual(r.headers["Content-Type"], "text/html; charset=utf-8")
             html = r.read().decode("utf-8")
         self.assertIn("deployggb.js", html)
-        self.assertIn('MODE = "ggb"', html)
         self.assertIn("/file/PCSI/Maths/figure.ggb", html)
         self.assertIn("/reveal/PCSI/Maths/figure.ggb", html)
 
-    def test_ouvrir_py_sert_la_page_basthon(self):
-        with self._get("/ouvrir/PCSI/Maths/script.py") as r:
+    def test_code_py_colorise(self):
+        with self._get("/code/PCSI/Maths/script.py") as r:
             self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers["Content-Type"], "text/html; charset=utf-8")
             html = r.read().decode("utf-8")
-        self.assertIn("console.basthon.fr", html)
-        self.assertIn('MODE = "py"', html)
-        self.assertIn("/file/PCSI/Maths/script.py", html)
-        self.assertIn("/reveal/PCSI/Maths/script.py", html)
+        # script.py = "print('hello')\nimport os\n" : 'import' est un mot-clé.
+        self.assertIn('class="kw"', html)
+        self.assertIn('class="str"', html)
+        self.assertIn("script.py", html)
 
     def test_ouvrir_traversal_403(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             self._get("/ouvrir/../secret.txt")
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_code_traversal_403(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/code/../secret.txt")
         self.assertEqual(ctx.exception.code, 403)
 
     def test_ouvrir_inexistant_404(self):

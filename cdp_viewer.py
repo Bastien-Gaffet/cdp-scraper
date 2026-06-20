@@ -6,12 +6,15 @@ standard uniquement, serveur lié à 127.0.0.1.
 """
 import argparse
 import html
+import io
 import json
+import keyword
 import mimetypes
 import os
 import socketserver
 import subprocess
 import sys
+import tokenize
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler
@@ -119,11 +122,12 @@ function elIcone(nom) {
 function urlReveal(c) {
   return "/reveal/" + c.split("/").map(encodeURIComponent).join("/");
 }
-function urlOuvrir(c) {
+function urlOuvrir(c) {   // .ggb : GeoGebra en ligne (repli appli PC / explorateur)
   return "/ouvrir/" + c.split("/").map(encodeURIComponent).join("/");
 }
-// Types ouverts en ligne (nouvel onglet) avec repli appli PC / explorateur.
-const EN_LIGNE = { ggb: "GeoGebra (en ligne)", py: "Basthon — Python en ligne" };
+function urlCode(c) {     // .py : affichage du code colorisé (pleine page)
+  return "/code/" + c.split("/").map(encodeURIComponent).join("/");
+}
 
 function octets(n) {
   if (n < 1024) return n + " o";
@@ -162,10 +166,13 @@ function ligne(noeud) {
   const ext = (noeud.ext || "").toLowerCase();
   if (dossier) {
     a.href = hashDe(noeud.chemin);                       // navigation dans l'arbre
-  } else if (EN_LIGNE[ext]) {
-    a.href = urlOuvrir(noeud.chemin);                    // appli en ligne, nouvel onglet
+  } else if (ext === "ggb") {
+    a.href = urlOuvrir(noeud.chemin);                    // GeoGebra en ligne, nouvel onglet
     a.target = "_blank"; a.rel = "noopener";
-    a.title = "Ouvrir dans " + EN_LIGNE[ext] + " — repli : application installée, sinon explorateur";
+    a.title = "Ouvrir dans GeoGebra (en ligne) — repli : application installée, sinon explorateur";
+  } else if (ext === "py") {
+    a.href = urlCode(noeud.chemin);                      // code Python colorisé, pleine page
+    a.title = "Afficher le code (coloré)";
   } else if (VISIONNABLES.has(ext)) {
     a.href = urlFichier(noeud.chemin);                   // ouverture pleine page
   } else {
@@ -326,16 +333,12 @@ init();
 </html>"""
 
 
-# Page d'ouverture d'un fichier dans une application en ligne (GeoGebra pour les
-# .ggb, Basthon pour les .py), avec repli en cascade : si l'application en ligne
-# est injoignable (pas d'accès Internet), on tente l'application installée sur le
-# PC, et à défaut on révèle le fichier dans l'explorateur (route /reveal).
-#
-# Confidentialité : les scripts (deployggb.js / la console Basthon) viennent de
-# leurs sites respectifs, mais le contenu du fichier est lu depuis le serveur
-# local (127.0.0.1) — pour Basthon, le code est passé en paramètre `script`
-# (base64) à la console. Le contenu n'est donc pas envoyé à un tiers par nos soins.
-PAGE_EXTERNE = r"""<!doctype html>
+# Page d'ouverture d'un .ggb dans GeoGebra en ligne, avec repli en cascade : si
+# GeoGebra est injoignable (pas d'accès Internet), on tente l'application
+# installée sur le PC, et à défaut on révèle le fichier dans l'explorateur.
+# Confidentialité : deployggb.js vient de geogebra.org, mais le fichier .ggb est
+# lu depuis le serveur local (127.0.0.1) ; son contenu n'est pas envoyé à un tiers.
+PAGE_GGB = r"""<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -353,11 +356,9 @@ PAGE_EXTERNE = r"""<!doctype html>
 <div id="ggb"></div>
 <div id="msg" hidden></div>
 <script>
-const MODE = "__MODE__";       // "ggb" | "py"
 const FICHIER = __FICHIER__;   // URL /file/... (même origine)
 const REVEAL  = __REVEAL__;    // URL /reveal/... (appli PC, sinon explorateur)
 const GGB_SRC = "https://www.geogebra.org/apps/deployggb.js";
-const BASTHON = "https://console.basthon.fr/?script=";
 
 function montrer(t) {
   document.getElementById("ggb").hidden = true;
@@ -365,7 +366,7 @@ function montrer(t) {
   m.textContent = t; m.hidden = false;
 }
 function repli() {
-  montrer("Application en ligne indisponible. Ouverture sur votre ordinateur…");
+  montrer("GeoGebra en ligne indisponible. Ouverture sur votre ordinateur…");
   fetch(REVEAL).catch(() => {});
 }
 // « En ligne » = navigateur connecté ET service joignable (fetch no-cors :
@@ -382,31 +383,112 @@ function chargerScript(src) {
     document.head.appendChild(s);
   });
 }
-function b64utf8(s) { return btoa(unescape(encodeURIComponent(s))); }
 
 (async () => {
-  if (MODE === "ggb") {
-    if (!(await enLigne(GGB_SRC))) return repli();
-    try { await chargerScript(GGB_SRC); } catch (e) { return repli(); }
-    new GGBApplet({
-      appName: "classic", filename: FICHIER,
-      width: window.innerWidth, height: window.innerHeight,
-      showToolBar: true, showMenuBar: true, showAlgebraInput: true,
-      errorDialogsActive: true
-    }, true).inject("ggb");
-  } else {
-    let code = null;
-    try { code = await (await fetch(FICHIER)).text(); } catch (e) {}
-    if (code !== null && await enLigne(BASTHON)) {
-      location.replace(BASTHON + encodeURIComponent(b64utf8(code)));
-    } else {
-      repli();
-    }
-  }
+  if (!(await enLigne(GGB_SRC))) return repli();
+  try { await chargerScript(GGB_SRC); } catch (e) { return repli(); }
+  new GGBApplet({
+    appName: "classic", filename: FICHIER,
+    width: window.innerWidth, height: window.innerHeight,
+    showToolBar: true, showMenuBar: true, showAlgebraInput: true,
+    errorDialogsActive: true
+  }, true).inject("ggb");
 })();
 </script>
 </body>
 </html>"""
+
+
+# Page d'affichage d'un fichier de code (Python) colorisé. La coloration est
+# faite côté serveur avec le module standard `tokenize` (aucune dépendance,
+# fonctionne hors-ligne). __CORPS__ est déjà du HTML échappé + balises <span>.
+PAGE_CODE = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITRE__</title>
+<style>
+:root{ --bg:#fbfbfc; --txt:#1d1d1f; --panel:#fff; --border:#e3e3e6;
+  --kw:#a626a4; --str:#50a14f; --com:#a0a1a7; --num:#986801; --gut:#9a9aa2; }
+[data-theme="dark"]{ --bg:#16171a; --txt:#e7e7ea; --panel:#1f2024; --border:#2c2d33;
+  --kw:#c678dd; --str:#98c379; --com:#7f848e; --num:#d19a66; --gut:#6b6b70; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+  font:14px/1.6 ui-monospace,"Cascadia Code","Consolas",monospace}
+header{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--border);
+  padding:8px 14px;font:13px/1.4 system-ui,sans-serif}
+pre{margin:0;padding:14px 16px;overflow:auto;tab-size:4;-moz-tab-size:4}
+.code{display:grid;grid-template-columns:auto 1fr;column-gap:14px}
+.gut{color:var(--gut);text-align:right;user-select:none;white-space:pre}
+.ln{white-space:pre}
+.kw{color:var(--kw)} .str{color:var(--str)} .com{color:var(--com);font-style:italic}
+.num{color:var(--num)}
+</style>
+</head>
+<body>
+<header>__TITRE__</header>
+<pre><div class="code"><div class="gut">__GOUTTIERE__</div><div class="ln">__CORPS__</div></div></pre>
+<script>
+if (localStorage.getItem("cdp-theme") === "dark")
+  document.documentElement.setAttribute("data-theme", "dark");
+</script>
+</body>
+</html>"""
+
+
+# Types de jetons colorisés comme chaîne (inclut les f-strings de Python 3.12+).
+_JETONS_STR = {tokenize.STRING}
+for _n in ("FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END"):
+    if hasattr(tokenize, _n):
+        _JETONS_STR.add(getattr(tokenize, _n))
+
+
+def colorier_python(source: str) -> str | None:
+    """Rend `source` (code Python) en HTML colorisé, en préservant exactement
+    l'indentation et les espaces. Renvoie None si le code n'est pas tokenisable
+    (l'appelant affiche alors le texte brut échappé)."""
+    try:
+        jetons = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return None
+    lignes = source.splitlines(keepends=True)
+
+    def ligne_at(r):
+        return lignes[r - 1] if 1 <= r <= len(lignes) else ""
+
+    def intervalle(r1, c1, r2, c2):
+        """Texte source brut entre deux positions (ligne, colonne)."""
+        if r2 > r1:
+            bouts = [ligne_at(r1)[c1:]]
+            bouts += [ligne_at(r) for r in range(r1 + 1, r2)]
+            bouts.append(ligne_at(r2)[:c2])
+            return "".join(bouts)
+        return ligne_at(r1)[c1:c2]
+
+    out = []
+    lr, lc = 1, 0
+    for typ, txt, (sr, sc), (er, ec), _ in jetons:
+        if typ == tokenize.ENCODING:
+            continue
+        if (sr, sc) > (lr, lc):                       # espaces entre deux jetons
+            out.append(html.escape(intervalle(lr, lc, sr, sc)))
+        cls = None
+        if typ == tokenize.COMMENT:
+            cls = "com"
+        elif typ in _JETONS_STR:
+            cls = "str"
+        elif typ == tokenize.NUMBER:
+            cls = "num"
+        elif typ == tokenize.NAME and keyword.iskeyword(txt):
+            cls = "kw"
+        # On émet la tranche réelle du source (et non `txt`) : garantit que le
+        # rendu, balises retirées, reproduit exactement le fichier d'origine
+        # même pour les jetons synthétiques (NEWLINE/DEDENT de fin de fichier).
+        esc = html.escape(intervalle(sr, sc, er, ec))
+        out.append(f'<span class="{cls}">{esc}</span>' if (cls and esc) else esc)
+        lr, lc = er, ec
+    return "".join(out)
 
 
 def resoudre_dans_racine(racine: Path, demande: str) -> Path | None:
@@ -583,7 +665,7 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             self._envoyer_json(200, arbre)
             return
 
-        if chemin.startswith("/ouvrir/"):
+        if chemin.startswith("/ouvrir/"):                 # .ggb -> GeoGebra en ligne
             rel = urllib.parse.unquote(chemin[len("/ouvrir/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
@@ -592,15 +674,36 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             if not cible.is_file():
                 self._erreur(404, "Fichier introuvable")
                 return
-            ext = cible.suffix.lstrip(".").lower()
-            mode = "ggb" if ext == "ggb" else "py"
             enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
-            page = (PAGE_EXTERNE
-                    .replace("__MODE__", mode)
+            page = (PAGE_GGB
                     .replace("__TITRE__", html.escape(cible.name))
                     .replace("__FICHIER__", json.dumps("/file/" + enc))
                     .replace("__REVEAL__", json.dumps("/reveal/" + enc)))
-            self._envoyer_octets(200, page.encode("utf-8"), "text/html; charset=utf-8")
+            self._envoyer_octets(200, page.encode("utf-8"),
+                                 "text/html; charset=utf-8", cache=False)
+            return
+
+        if chemin.startswith("/code/"):                   # .py -> code colorise
+            rel = urllib.parse.unquote(chemin[len("/code/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.is_file():
+                self._erreur(404, "Fichier introuvable")
+                return
+            source = cible.read_text(encoding="utf-8", errors="replace")
+            corps = colorier_python(source)
+            if corps is None:                             # non tokenisable : texte brut
+                corps = html.escape(source)
+            n = max(1, len(source.splitlines()))
+            gouttiere = "\n".join(str(i) for i in range(1, n + 1))
+            page = (PAGE_CODE
+                    .replace("__TITRE__", html.escape(cible.name))
+                    .replace("__GOUTTIERE__", gouttiere)
+                    .replace("__CORPS__", corps))
+            self._envoyer_octets(200, page.encode("utf-8"),
+                                 "text/html; charset=utf-8", cache=False)
             return
 
         if chemin.startswith("/file/"):
