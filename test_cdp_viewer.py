@@ -90,17 +90,20 @@ class TestConstruireArbre(unittest.TestCase):
 class TestOuvrirOuReveler(unittest.TestCase):
     @unittest.skipUnless(__import__("sys").platform == "win32", "logique Windows")
     def test_lance_l_app_associee(self):
-        with mock.patch("cdp_viewer.os.startfile") as start, \
+        with mock.patch.object(cdp_viewer, "_a_une_app_associee_windows", return_value=True), \
+             mock.patch("cdp_viewer.os.startfile") as start, \
              mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as rev:
-            cdp_viewer.ouvrir_ou_reveler(Path("C:/x/y.ggb"))
+            cdp_viewer.ouvrir_ou_reveler(Path("C:/x/y.docx"))
         start.assert_called_once()
         rev.assert_not_called()
 
     @unittest.skipUnless(__import__("sys").platform == "win32", "logique Windows")
     def test_revele_si_pas_d_app(self):
-        with mock.patch("cdp_viewer.os.startfile", side_effect=OSError), \
+        with mock.patch.object(cdp_viewer, "_a_une_app_associee_windows", return_value=False), \
+             mock.patch("cdp_viewer.os.startfile") as start, \
              mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as rev:
             cdp_viewer.ouvrir_ou_reveler(Path("C:/x/y.ggb"))
+        start.assert_not_called()
         rev.assert_called_once()
 
 
@@ -112,6 +115,7 @@ class TestServeur(unittest.TestCase):
         maths = cls.racine / "PCSI" / "Maths"
         maths.mkdir(parents=True)
         (maths / "cours.pdf").write_bytes(b"%PDF-1.4 contenu")
+        (maths / "figure.ggb").write_bytes(b"PK\x03\x04 ggb")
         (cls.racine / "secret.txt").write_text("hors classe")
 
         cls.serveur = cdp_viewer.creer_serveur(cls.racine, port=0)
@@ -181,6 +185,24 @@ class TestServeur(unittest.TestCase):
                 self._get("/reveal/PCSI/Maths/absent.ggb")
         self.assertEqual(ctx.exception.code, 404)
         m.assert_not_called()
+
+    def test_ggb_sert_la_page_geogebra(self):
+        with self._get("/ggb/PCSI/Maths/figure.ggb") as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers["Content-Type"], "text/html; charset=utf-8")
+            html = r.read().decode("utf-8")
+        self.assertIn("deployggb.js", html)
+        self.assertIn("/file/PCSI/Maths/figure.ggb", html)
+
+    def test_ggb_traversal_403(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/ggb/../secret.txt")
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_ggb_inexistant_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/ggb/PCSI/Maths/absent.ggb")
+        self.assertEqual(ctx.exception.code, 404)
 
     def test_page_racine_contient_le_squelette(self):
         with self._get("/") as r:

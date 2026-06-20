@@ -119,6 +119,13 @@ python cdp_viewer.py --port 8080 --no-browser
 Le navigateur s'ouvre sur `http://127.0.0.1:8000`. Choisissez la classe en haut,
 naviguez dans l'arbre à gauche, l'aperçu s'affiche à droite.
 
+- Les fichiers **GeoGebra** (`.ggb`) s'ouvrent dans un nouvel onglet via
+  l'applet **GeoGebra en ligne** (le fichier reste servi localement, son contenu
+  n'est pas envoyé à un tiers).
+- Les autres fichiers non affichables par le navigateur (ex. `.docx`) s'ouvrent
+  dans l'application associée si elle est installée, sinon le fichier est
+  **révélé dans l'explorateur** (jamais de téléchargement silencieux).
+
 ---
 
 ## 📄 Licence

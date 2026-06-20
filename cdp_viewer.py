@@ -5,6 +5,7 @@ Sert l'arborescence cours_cdp/<classe>/... dans le navigateur. Bibliothèque
 standard uniquement, serveur lié à 127.0.0.1.
 """
 import argparse
+import html
 import json
 import mimetypes
 import os
@@ -50,6 +51,7 @@ main { flex:1; display:flex; min-height:0; }
   overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
 .rubrique:hover { background:var(--hover); }
 .rubrique.actif { background:var(--accent); color:#fff; }
+.rubrique .ico { color:var(--accent); }
 .rubrique.actif .ico { color:#fff; }
 
 #explorateur { flex:1; overflow:auto; padding:16px 24px; }
@@ -117,6 +119,9 @@ function elIcone(nom) {
 function urlReveal(c) {
   return "/reveal/" + c.split("/").map(encodeURIComponent).join("/");
 }
+function urlGgb(c) {
+  return "/ggb/" + c.split("/").map(encodeURIComponent).join("/");
+}
 
 function octets(n) {
   if (n < 1024) return n + " o";
@@ -154,6 +159,10 @@ function ligne(noeud) {
   a.className = "ligne " + (dossier ? "dossier" : "doc");
   if (dossier) {
     a.href = hashDe(noeud.chemin);                       // navigation dans l'arbre
+  } else if ((noeud.ext || "").toLowerCase() === "ggb") {
+    a.href = urlGgb(noeud.chemin);                       // GeoGebra en ligne, nouvel onglet
+    a.target = "_blank"; a.rel = "noopener";
+    a.title = "Ouvrir dans GeoGebra (en ligne, nouvel onglet)";
   } else if (VISIONNABLES.has((noeud.ext || "").toLowerCase())) {
     a.href = urlFichier(noeud.chemin);                   // ouverture pleine page
   } else {
@@ -314,6 +323,42 @@ init();
 </html>"""
 
 
+# Page d'ouverture d'un .ggb via l'applet GeoGebra en ligne. Le script de
+# l'applet vient de geogebra.org, mais le fichier .ggb est chargé depuis le
+# serveur local (127.0.0.1) : son contenu n'est pas envoyé à un tiers, il est
+# seulement rendu côté navigateur par l'applet.
+PAGE_GGB = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__NOM__ — GeoGebra</title>
+<style>html,body{margin:0;height:100%;background:#fff;overflow:hidden}</style>
+<script src="https://www.geogebra.org/apps/deployggb.js"></script>
+</head>
+<body>
+<div id="ggb"></div>
+<script>
+const applet = new GGBApplet({
+  appName: "classic",
+  filename: __FICHIER__,
+  width: window.innerWidth,
+  height: window.innerHeight,
+  showToolBar: true,
+  showMenuBar: true,
+  showAlgebraInput: true,
+  errorDialogsActive: true
+}, true);
+window.addEventListener("load", () => applet.inject("ggb"));
+window.addEventListener("resize", () => {
+  const o = applet.getAppletObject ? applet.getAppletObject() : null;
+  if (o && o.setSize) o.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>"""
+
+
 def resoudre_dans_racine(racine: Path, demande: str) -> Path | None:
     """Résout `demande` (chemin relatif) sous `racine` et garantit qu'il y reste.
 
@@ -387,21 +432,52 @@ def reveler_dans_explorateur(cible: Path):
         subprocess.run(["xdg-open", str(cible.parent)])
 
 
+def _a_une_app_associee_windows(cible: Path) -> bool:
+    """True si l'extension de `cible` a une application associée sous Windows.
+
+    On interroge AssocQueryStringW (shlwapi) plutôt que de tenter os.startfile
+    « à l'aveugle » : sans application associée, os.startfile ouvre la fenêtre
+    « Comment voulez-vous ouvrir ce fichier ? » au lieu de lever une erreur, ce
+    qui empêcherait le repli sur l'explorateur.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    ext = cible.suffix
+    if not ext:
+        return False
+    ASSOCF_NONE = 0
+    ASSOCSTR_EXECUTABLE = 2
+    tampon = ctypes.create_unicode_buffer(1024)
+    taille = wintypes.DWORD(len(tampon))
+    res = ctypes.windll.shlwapi.AssocQueryStringW(
+        ASSOCF_NONE, ASSOCSTR_EXECUTABLE, ext, None, tampon, ctypes.byref(taille))
+    if res != 0 or not tampon.value:
+        return False
+    # Une extension SANS application résout vers OpenWith.exe (le sélecteur
+    # « Comment voulez-vous ouvrir ce fichier ? ») : on le traite comme « pas
+    # d'app » pour basculer sur la révélation dans l'explorateur.
+    return os.path.basename(tampon.value).lower() != "openwith.exe"
+
+
 def ouvrir_ou_reveler(cible: Path):
     """Ouvre `cible` avec son application associée si elle est installée,
     sinon la révèle (sélectionnée) dans l'explorateur de fichiers.
 
-    Cas d'usage : un .ggb s'ouvre dans GeoGebra s'il est installé ; sinon
-    l'utilisateur retrouve le fichier dans l'explorateur pour décider quoi en
-    faire (plutôt qu'un téléchargement silencieux par le navigateur).
+    L'utilisateur retrouve ainsi le fichier dans l'explorateur pour décider quoi
+    en faire (plutôt qu'un téléchargement silencieux par le navigateur, ou la
+    fenêtre Windows « Comment ouvrir ce fichier ? »).
     """
     if sys.platform == "win32":
-        try:
-            os.startfile(str(cible))  # lance l'app associée (GeoGebra, Word…)
-            return
-        except OSError:
-            pass  # aucune application associée → on révèle dans l'explorateur
-    elif sys.platform == "darwin":
+        if _a_une_app_associee_windows(cible):
+            try:
+                os.startfile(str(cible))  # lance l'app associée (Word…)
+                return
+            except OSError:
+                pass
+        reveler_dans_explorateur(cible)
+        return
+    if sys.platform == "darwin":
         # open échoue (code != 0) s'il n'y a pas d'app associée → on révèle.
         if subprocess.run(["open", str(cible)]).returncode == 0:
             return
@@ -449,6 +525,23 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
                 self._erreur(404, "Classe introuvable")
                 return
             self._envoyer_json(200, arbre)
+            return
+
+        if chemin.startswith("/ggb/"):
+            rel = urllib.parse.unquote(chemin[len("/ggb/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.is_file():
+                self._erreur(404, "Fichier introuvable")
+                return
+            url_fichier = "/file/" + "/".join(
+                urllib.parse.quote(seg) for seg in rel.split("/"))
+            page = (PAGE_GGB
+                    .replace("__FICHIER__", json.dumps(url_fichier))
+                    .replace("__NOM__", html.escape(cible.name)))
+            self._envoyer_octets(200, page.encode("utf-8"), "text/html; charset=utf-8")
             return
 
         if chemin.startswith("/file/"):
