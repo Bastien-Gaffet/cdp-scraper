@@ -4,10 +4,12 @@
 Sert l'arborescence cours_cdp/<classe>/... dans le navigateur. Bibliothèque
 standard uniquement, serveur lié à 127.0.0.1.
 """
+import argparse
 import json
 import mimetypes
 import socketserver
 import urllib.parse
+import webbrowser
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -319,3 +321,37 @@ class ServeurCDP(socketserver.TCPServer):
 def creer_serveur(racine: Path, port: int) -> ServeurCDP:
     """Crée (sans démarrer) le serveur lié à 127.0.0.1 sur `port` (0 = éphémère)."""
     return ServeurCDP(("127.0.0.1", port), GestionnaireCDP, Path(racine))
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Visualiseur web local des cours téléchargés par cdp_scraper.")
+    p.add_argument("--dossier", default="cours_cdp", metavar="CHEMIN",
+                   help="Dossier racine des cours (défaut : cours_cdp)")
+    p.add_argument("--port", type=int, default=8000,
+                   help="Port d'écoute (défaut : 8000)")
+    p.add_argument("--no-browser", action="store_true",
+                   help="Ne pas ouvrir le navigateur automatiquement")
+    args = p.parse_args()
+
+    racine = Path(args.dossier)
+    if not racine.is_dir():
+        print(f"Dossier introuvable : {racine.resolve()}")
+        print("Lancez d'abord cdp_scraper.py, ou indiquez --dossier <chemin>.")
+
+    serveur = creer_serveur(racine, args.port)
+    url = f"http://127.0.0.1:{serveur.server_address[1]}"
+    print(f"cdp-viewer en écoute sur {url}  (Ctrl+C pour arrêter)")
+    if not args.no_browser:
+        webbrowser.open(url)
+    try:
+        serveur.serve_forever()
+    except KeyboardInterrupt:
+        print("\nArrêt.")
+    finally:
+        serveur.shutdown()
+        serveur.server_close()
+
+
+if __name__ == "__main__":
+    main()
