@@ -7,6 +7,7 @@ standard uniquement, serveur lié à 127.0.0.1.
 import argparse
 import json
 import mimetypes
+import os
 import socketserver
 import subprocess
 import sys
@@ -49,11 +50,12 @@ main { flex:1; display:flex; min-height:0; }
   overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
 .rubrique:hover { background:var(--hover); }
 .rubrique.actif { background:var(--accent); color:#fff; }
+.rubrique.actif .ico { color:#fff; }
 
 #explorateur { flex:1; overflow:auto; padding:16px 24px; }
 .fil { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-bottom:16px;
-  color:var(--muted); }
-.fil a { color:var(--accent); }
+  color:var(--txt); }
+.fil a { color:var(--txt); }
 .fil a:hover { text-decoration:underline; }
 .fil .sep { color:var(--muted); }
 .fil .courant { color:var(--txt); }
@@ -155,8 +157,8 @@ function ligne(noeud) {
   } else if (VISIONNABLES.has((noeud.ext || "").toLowerCase())) {
     a.href = urlFichier(noeud.chemin);                   // ouverture pleine page
   } else {
-    a.href = urlReveal(noeud.chemin);                    // afficher dans l'explorateur
-    a.title = "Afficher dans l'explorateur de fichiers";
+    a.href = urlReveal(noeud.chemin);                    // ouvrir (ou révéler dans l'explorateur)
+    a.title = "Ouvrir avec l'application associée, sinon afficher dans l'explorateur";
     a.onclick = (e) => { e.preventDefault(); fetch(urlReveal(noeud.chemin)); };
   }
   const nom = document.createElement("span");
@@ -385,6 +387,30 @@ def reveler_dans_explorateur(cible: Path):
         subprocess.run(["xdg-open", str(cible.parent)])
 
 
+def ouvrir_ou_reveler(cible: Path):
+    """Ouvre `cible` avec son application associée si elle est installée,
+    sinon la révèle (sélectionnée) dans l'explorateur de fichiers.
+
+    Cas d'usage : un .ggb s'ouvre dans GeoGebra s'il est installé ; sinon
+    l'utilisateur retrouve le fichier dans l'explorateur pour décider quoi en
+    faire (plutôt qu'un téléchargement silencieux par le navigateur).
+    """
+    if sys.platform == "win32":
+        try:
+            os.startfile(str(cible))  # lance l'app associée (GeoGebra, Word…)
+            return
+        except OSError:
+            pass  # aucune application associée → on révèle dans l'explorateur
+    elif sys.platform == "darwin":
+        # open échoue (code != 0) s'il n'y a pas d'app associée → on révèle.
+        if subprocess.run(["open", str(cible)]).returncode == 0:
+            return
+    else:
+        if subprocess.run(["xdg-open", str(cible)]).returncode == 0:
+            return
+    reveler_dans_explorateur(cible)
+
+
 class GestionnaireCDP(BaseHTTPRequestHandler):
     """Sert la page, l'API JSON et les fichiers. `self.server.racine` = racine."""
 
@@ -452,7 +478,7 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
                 self._erreur(404, "Fichier introuvable")
                 return
             try:
-                reveler_dans_explorateur(cible)
+                ouvrir_ou_reveler(cible)
             except Exception:
                 pass
             self.send_response(204)

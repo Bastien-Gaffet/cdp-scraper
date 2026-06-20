@@ -87,6 +87,23 @@ class TestConstruireArbre(unittest.TestCase):
         self.assertIsNone(cdp_viewer.construire_arbre(self.racine, "TERM"))
 
 
+class TestOuvrirOuReveler(unittest.TestCase):
+    @unittest.skipUnless(__import__("sys").platform == "win32", "logique Windows")
+    def test_lance_l_app_associee(self):
+        with mock.patch("cdp_viewer.os.startfile") as start, \
+             mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as rev:
+            cdp_viewer.ouvrir_ou_reveler(Path("C:/x/y.ggb"))
+        start.assert_called_once()
+        rev.assert_not_called()
+
+    @unittest.skipUnless(__import__("sys").platform == "win32", "logique Windows")
+    def test_revele_si_pas_d_app(self):
+        with mock.patch("cdp_viewer.os.startfile", side_effect=OSError), \
+             mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as rev:
+            cdp_viewer.ouvrir_ou_reveler(Path("C:/x/y.ggb"))
+        rev.assert_called_once()
+
+
 class TestServeur(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -144,22 +161,22 @@ class TestServeur(unittest.TestCase):
             self._get("/file/../secret.txt")
         self.assertEqual(ctx.exception.code, 403)
 
-    def test_reveal_appelle_l_explorateur(self):
-        with mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as m:
+    def test_reveal_ouvre_ou_revele(self):
+        with mock.patch.object(cdp_viewer, "ouvrir_ou_reveler") as m:
             with self._get("/reveal/PCSI/Maths/cours.pdf") as r:
                 self.assertEqual(r.status, 204)
         self.assertEqual(m.call_count, 1)
         self.assertEqual(Path(m.call_args[0][0]).name, "cours.pdf")
 
     def test_reveal_traversal_403(self):
-        with mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as m:
+        with mock.patch.object(cdp_viewer, "ouvrir_ou_reveler") as m:
             with self.assertRaises(urllib.error.HTTPError) as ctx:
                 self._get("/reveal/../secret.txt")
         self.assertEqual(ctx.exception.code, 403)
         m.assert_not_called()
 
     def test_reveal_inexistant_404(self):
-        with mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as m:
+        with mock.patch.object(cdp_viewer, "ouvrir_ou_reveler") as m:
             with self.assertRaises(urllib.error.HTTPError) as ctx:
                 self._get("/reveal/PCSI/Maths/absent.ggb")
         self.assertEqual(ctx.exception.code, 404)
