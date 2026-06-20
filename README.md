@@ -1,5 +1,7 @@
 # 📚 cdp-scraper
 
+[![Licence : CeCILL-2.1](https://img.shields.io/badge/Licence-CeCILL--2.1-blue.svg)](LICENSE)
+
 > Sauvegarde personnelle de **vos** documents sur [cahier-de-prepa.fr](https://cahier-de-prepa.fr).
 
 `cdp-scraper` se connecte avec **vos identifiants**, explore l'arborescence
@@ -47,16 +49,30 @@ Au **premier lancement**, ces conditions s'affichent et vous devez les accepter
 
 ## 🚀 Installation
 
+Python ≥ 3.8 requis (seule dépendance : `requests`).
+
+### Pour utiliser l'outil — le plus simple
+
+Pas besoin de Git. Téléchargez directement le dépôt :
+
+1. Sur la page GitHub, cliquez sur **`Code` ▾ → `Download ZIP`**
+   (ou récupérez directement [l'archive `main.zip`](https://github.com/Bastien-Gaffet/cdp-scraper/archive/refs/heads/main.zip)).
+2. Décompressez l'archive, puis ouvrez un terminal dans le dossier obtenu.
+3. Lancez le script : `python cdp_scraper.py`.
+
+> 💡 Rien à installer à la main : au premier lancement, le script détecte si
+> `requests` manque et propose de l'installer pour vous (`pip install requests`).
+
+### Pour contribuer ou suivre les mises à jour — avec Git
+
+Si vous comptez modifier le code, proposer des correctifs (*pull requests*) ou
+récupérer facilement les futures versions :
+
 ```bash
 git clone https://github.com/Bastien-Gaffet/cdp-scraper.git
 cd cdp-scraper
 pip install -r requirements.txt
 ```
-
-Python ≥ 3.8 requis (seule dépendance : `requests`).
-
-> 💡 Si vous oubliez l'installation, le script détecte la dépendance manquante
-> et propose de l'installer pour vous (`pip install requests`) au lancement.
 
 ## ▶️ Utilisation
 
