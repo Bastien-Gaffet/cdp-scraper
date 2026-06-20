@@ -103,6 +103,24 @@ programmes de colles, mode simulation) : [docs/cdp_scraper_doc.md](docs/cdp_scra
 
 ---
 
+## 🖥️ Parcourir ses cours (visualiseur local)
+
+Une fois vos documents téléchargés, `cdp_viewer.py` lance un petit site **local**
+pour les parcourir confortablement (arborescence, aperçu PDF/images/texte,
+recherche, mode sombre). Aucune dépendance supplémentaire, rien n'est exposé sur
+le réseau (le serveur n'écoute que sur `127.0.0.1`).
+
+```bash
+python cdp_viewer.py                     # sert ./cours_cdp et ouvre le navigateur
+python cdp_viewer.py --dossier ./cours   # autre dossier racine
+python cdp_viewer.py --port 8080 --no-browser
+```
+
+Le navigateur s'ouvre sur `http://127.0.0.1:8000`. Choisissez la classe en haut,
+naviguez dans l'arbre à gauche, l'aperçu s'affiche à droite.
+
+---
+
 ## 📄 Licence
 
 Distribué sous licence **CeCILL-2.1** (licence libre française, compatible GPL).
