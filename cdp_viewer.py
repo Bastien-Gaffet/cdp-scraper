@@ -374,7 +374,11 @@ def reveler_dans_explorateur(cible: Path):
     """Affiche `cible` dans l'explorateur de fichiers du système (sélectionné)."""
     chemin = str(cible)
     if sys.platform == "win32":
-        subprocess.run(["explorer", f"/select,{chemin}"])
+        # explorer.exe exige les guillemets AUTOUR DU CHEMIN SEUL. En mode liste,
+        # subprocess quote tout l'argument « /select,<chemin> » (à cause des
+        # espaces/accents), et explorer abandonne en ouvrant le dossier Documents.
+        # On passe donc la ligne de commande en chaîne, avec le bon découpage.
+        subprocess.run(f'explorer /select,"{chemin}"')
     elif sys.platform == "darwin":
         subprocess.run(["open", "-R", chemin])
     else:
