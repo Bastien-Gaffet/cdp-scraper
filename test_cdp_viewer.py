@@ -147,8 +147,9 @@ class TestServeur(unittest.TestCase):
         with self._get("/") as r:
             html = r.read().decode("utf-8")
         self.assertIn("cdp-viewer", html)
-        self.assertIn("id=\"arbre\"", html)
-        self.assertIn("id=\"apercu\"", html)
+        self.assertIn("id=\"rubriques\"", html)
+        self.assertIn("id=\"explorateur\"", html)
+        self.assertIn("id=\"document\"", html)
         self.assertIn("/api/classes", html)
 
 
