@@ -8,6 +8,8 @@ import argparse
 import json
 import mimetypes
 import socketserver
+import subprocess
+import sys
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler
@@ -57,23 +59,27 @@ main { flex:1; display:flex; min-height:0; }
 .fil .courant { color:var(--txt); }
 
 .liste { display:flex; flex-direction:column; }
-.ligne { display:flex; align-items:baseline; gap:8px; padding:7px 8px;
+.ligne { display:flex; align-items:center; gap:10px; padding:8px;
   border-bottom:1px solid var(--border); }
 .ligne:hover { background:var(--hover); }
-.ligne .ico { font-size:16px; flex-shrink:0; }
+.ico { display:inline-flex; align-items:center; flex-shrink:0; color:var(--muted); }
+.ico svg { display:block; }
+.ligne.dossier .ico { color:var(--accent); }
 .ligne .nom { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ligne.dossier .nom { font-weight:600; }
 .ligne .meta { color:var(--muted); font-size:12px; margin-left:auto; flex-shrink:0;
   padding-left:12px; }
 .vide { color:var(--muted); padding:24px 0; }
+#theme { display:inline-flex; align-items:center; }
+.fil a, .fil .courant { display:inline-flex; align-items:center; gap:4px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>&#128218; cdp-viewer</h1>
+  <h1>cdp-viewer</h1>
   <select id="classe" title="Classe"></select>
-  <input id="recherche" class="grow" placeholder="&#128269; Rechercher un document&hellip;">
-  <button id="theme" title="Mode sombre">&#127769;</button>
+  <input id="recherche" class="grow" placeholder="Rechercher un document&hellip;">
+  <button id="theme" title="Mode sombre"></button>
 </header>
 <main>
   <nav id="rubriques"></nav>
@@ -87,6 +93,28 @@ const elRecherche = document.getElementById("recherche");
 
 let arbres = {};          // cache : nom de classe -> nœud racine
 let classesDispo = [];
+
+// Icônes SVG (suivent la couleur du texte, sans emoji).
+const ICONES = {
+  dossier: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z"/></svg>',
+  document: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M7 3h7l5 5v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>',
+  accueil: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9"/></svg>',
+  theme: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+};
+// Extensions que le navigateur sait afficher (sinon : ouverture dans l'explorateur).
+const VISIONNABLES = new Set([
+  "pdf","png","jpg","jpeg","gif","webp","svg","bmp","ico",
+  "txt","md","markdown","csv","tsv","py","tex","json","log","c","cpp","java","ml","sql","r",
+  "html","htm","mp3","wav","ogg","mp4","webm","m4a","mov"
+]);
+function elIcone(nom) {
+  const s = document.createElement("span");
+  s.className = "ico"; s.innerHTML = ICONES[nom];
+  return s;
+}
+function urlReveal(c) {
+  return "/reveal/" + c.split("/").map(encodeURIComponent).join("/");
+}
 
 function octets(n) {
   if (n < 1024) return n + " o";
@@ -122,16 +150,23 @@ function ligne(noeud) {
   const dossier = noeud.type === "dossier";
   const a = document.createElement("a");
   a.className = "ligne " + (dossier ? "dossier" : "doc");
-  a.href = dossier ? hashDe(noeud.chemin) : urlFichier(noeud.chemin);
-  const ico = document.createElement("span");
-  ico.className = "ico"; ico.textContent = dossier ? "📁" : "📄";
+  if (dossier) {
+    a.href = hashDe(noeud.chemin);                       // navigation dans l'arbre
+  } else if (VISIONNABLES.has((noeud.ext || "").toLowerCase())) {
+    a.href = urlFichier(noeud.chemin);                   // ouverture pleine page
+  } else {
+    a.href = urlReveal(noeud.chemin);                    // afficher dans l'explorateur
+    a.title = "Afficher dans l'explorateur de fichiers";
+    a.onclick = (e) => { e.preventDefault(); fetch(urlReveal(noeud.chemin)); };
+  }
   const nom = document.createElement("span");
-  nom.className = "nom"; nom.textContent = noeud.nom; nom.title = noeud.nom;
+  nom.className = "nom"; nom.textContent = noeud.nom;
   const meta = document.createElement("span");
   meta.className = "meta";
   meta.textContent = dossier ? "(" + nbElements(noeud) + ")"
     : "(" + (noeud.ext ? noeud.ext.toUpperCase() + " · " : "") + octets(noeud.taille) + ")";
-  a.appendChild(ico); a.appendChild(nom); a.appendChild(meta);
+  a.appendChild(elIcone(dossier ? "dossier" : "document"));
+  a.appendChild(nom); a.appendChild(meta);
   return a;
 }
 
@@ -146,14 +181,12 @@ function rendreFil(arbre, cible) {
       sep.className = "sep"; sep.textContent = "/"; fil.appendChild(sep);
     }
     const prefixe = segs.slice(0, i + 1).join("/");
-    const label = i === 0 ? "🏠 " + seg : seg;
-    if (i === segs.length - 1) {
-      const span = document.createElement("span");
-      span.className = "courant"; span.textContent = label; fil.appendChild(span);
-    } else {
-      const a = document.createElement("a");
-      a.textContent = label; a.href = hashDe(prefixe); fil.appendChild(a);
-    }
+    const dernier = i === segs.length - 1;
+    const el = document.createElement(dernier ? "span" : "a");
+    if (dernier) el.className = "courant"; else el.href = hashDe(prefixe);
+    if (i === 0) el.appendChild(elIcone("accueil"));
+    el.appendChild(document.createTextNode((i === 0 ? " " : "") + seg));
+    fil.appendChild(el);
   });
   return fil;
 }
@@ -181,14 +214,16 @@ function rendreRubriques(arbre, cible) {
   const actifTop = segs.length > 1 ? segs[1] : null;
   const accueil = document.createElement("a");
   accueil.className = "rubrique" + (actifTop === null ? " actif" : "");
-  accueil.textContent = "🏠 Accueil";
   accueil.href = hashDe(arbre.chemin);
+  accueil.appendChild(elIcone("accueil"));
+  accueil.appendChild(document.createTextNode(" Accueil"));
   elRubriques.appendChild(accueil);
   tri(arbre.enfants).filter(e => e.type === "dossier").forEach(d => {
     const r = document.createElement("a");
     r.className = "rubrique" + (d.nom === actifTop ? " actif" : "");
-    r.textContent = "📁 " + d.nom; r.title = d.nom;
-    r.href = hashDe(d.chemin);
+    r.href = hashDe(d.chemin); r.title = d.nom;
+    r.appendChild(elIcone("dossier"));
+    r.appendChild(document.createTextNode(" " + d.nom));
     elRubriques.appendChild(r);
   });
 }
@@ -262,6 +297,7 @@ elRecherche.oninput = () => {
   if (!arbre) return;
   if (q === "") naviguer(); else rechercher(arbre, q);
 };
+document.getElementById("theme").innerHTML = ICONES.theme;
 document.getElementById("theme").onclick = () => {
   const sombre = document.documentElement.getAttribute("data-theme") === "dark";
   document.documentElement.setAttribute("data-theme", sombre ? "light" : "dark");
@@ -328,6 +364,23 @@ def construire_arbre(racine: Path, classe: str) -> dict | None:
     return _noeud(racine, base)
 
 
+# Extensions servies en text/plain pour s'afficher dans le navigateur plutôt
+# que de se télécharger (sinon le type MIME deviné déclencherait un download).
+EXT_TEXTE = {"txt", "md", "markdown", "csv", "tsv", "py", "tex", "json", "log",
+             "c", "cpp", "java", "ml", "sql", "r"}
+
+
+def reveler_dans_explorateur(cible: Path):
+    """Affiche `cible` dans l'explorateur de fichiers du système (sélectionné)."""
+    chemin = str(cible)
+    if sys.platform == "win32":
+        subprocess.run(["explorer", f"/select,{chemin}"])
+    elif sys.platform == "darwin":
+        subprocess.run(["open", "-R", chemin])
+    else:
+        subprocess.run(["xdg-open", str(cible.parent)])
+
+
 class GestionnaireCDP(BaseHTTPRequestHandler):
     """Sert la page, l'API JSON et les fichiers. `self.server.racine` = racine."""
 
@@ -377,8 +430,29 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             if not cible.is_file():
                 self._erreur(404, "Fichier introuvable")
                 return
-            ctype = mimetypes.guess_type(cible.name)[0] or "application/octet-stream"
+            ext = cible.suffix.lstrip(".").lower()
+            if ext in EXT_TEXTE:
+                ctype = "text/plain; charset=utf-8"
+            else:
+                ctype = mimetypes.guess_type(cible.name)[0] or "application/octet-stream"
             self._envoyer_octets(200, cible.read_bytes(), ctype)
+            return
+
+        if chemin.startswith("/reveal/"):
+            rel = urllib.parse.unquote(chemin[len("/reveal/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.exists():
+                self._erreur(404, "Fichier introuvable")
+                return
+            try:
+                reveler_dans_explorateur(cible)
+            except Exception:
+                pass
+            self.send_response(204)
+            self.end_headers()
             return
 
         self._erreur(404, "Introuvable")

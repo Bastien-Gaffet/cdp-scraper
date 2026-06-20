@@ -5,6 +5,7 @@ import json
 import threading
 import urllib.request
 import urllib.error
+from unittest import mock
 
 import cdp_viewer
 
@@ -142,6 +143,27 @@ class TestServeur(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             self._get("/file/../secret.txt")
         self.assertEqual(ctx.exception.code, 403)
+
+    def test_reveal_appelle_l_explorateur(self):
+        with mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as m:
+            with self._get("/reveal/PCSI/Maths/cours.pdf") as r:
+                self.assertEqual(r.status, 204)
+        self.assertEqual(m.call_count, 1)
+        self.assertEqual(Path(m.call_args[0][0]).name, "cours.pdf")
+
+    def test_reveal_traversal_403(self):
+        with mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as m:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._get("/reveal/../secret.txt")
+        self.assertEqual(ctx.exception.code, 403)
+        m.assert_not_called()
+
+    def test_reveal_inexistant_404(self):
+        with mock.patch.object(cdp_viewer, "reveler_dans_explorateur") as m:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._get("/reveal/PCSI/Maths/absent.ggb")
+        self.assertEqual(ctx.exception.code, 404)
+        m.assert_not_called()
 
     def test_page_racine_contient_le_squelette(self):
         with self._get("/") as r:
