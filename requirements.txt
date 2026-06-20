@@ -1,0 +1,3 @@
+# Seule dépendance : requests (HTTP + session/cookies).
+# Les couleurs du terminal et l'analyse HTML sont gérées sans dépendance externe.
+requests>=2.25

@@ -1,0 +1,35 @@
+# ── Données personnelles / RGPD — ne JAMAIS versionner ───────────────────────
+# Documents téléchargés (cours, sujets, corrigés = propriété des professeurs)
+cours_cdp/
+cours/
+*/cours_cdp/
+
+# Cookies de session et identifiants
+cookies*.txt
+*.cookie
+.cdp-scraper/
+
+# Listes d'URLs exportées (peuvent révéler la structure d'une classe privée)
+urls*.txt
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+
+# ── Outils / éditeurs ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Fichiers de diagnostic / temporaires ─────────────────────────────────────
+_diag_*.py
+_dump_*.html
+_pc.php
+*.tmp

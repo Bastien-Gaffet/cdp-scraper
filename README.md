@@ -1,0 +1,102 @@
+# 📚 cdp-scraper
+
+> Sauvegarde personnelle de **vos** documents sur [cahier-de-prepa.fr](https://cahier-de-prepa.fr).
+
+`cdp-scraper` se connecte avec **vos identifiants**, explore l'arborescence
+« Documents à télécharger » de votre classe et la recopie à l'identique sur
+votre disque (mêmes dossiers, mêmes noms de fichiers), programmes de colles
+compris. Pensé pour les élèves de prépa qui veulent garder leurs cours après
+l'année.
+
+---
+
+## ⚠️ À lire avant tout — usage légal
+
+`cdp-scraper` est un **outil de sauvegarde personnelle**, pas un outil de
+collecte ni de rediffusion. En l'utilisant, vous vous engagez à :
+
+- **N'accéder qu'à vos propres contenus**, avec vos propres identifiants.
+  L'outil ne télécharge **que ce que votre compte voit déjà** sur le site : il
+  ne contourne aucun contrôle d'accès et ne casse aucun mot de passe.
+- **Respecter le droit d'auteur.** Les cours, sujets et corrigés sont la
+  propriété intellectuelle de leurs auteurs (vos professeurs). Réservez-les à
+  un **usage strictement personnel et pédagogique**.
+- **Ne pas rediffuser massivement** ces documents (site public, réseau social,
+  plateforme de partage…). C'est exactement ce que demande l'avertissement
+  affiché par cahier-de-prepa lui-même.
+- **Ménager le serveur** : l'outil fait une requête à la fois ; utilisez
+  `--delai` pour ajouter une pause si vous le souhaitez.
+
+> Ce projet **n'est pas affilié** à cahier-de-prepa.fr ni à l'association qui
+> l'édite. Il interagit simplement avec le site comme le ferait un navigateur,
+> en s'identifiant honnêtement (User-Agent `cdp-scraper/…`).
+
+Au **premier lancement**, ces conditions s'affichent et vous devez les accepter
+(`j'accepte`). L'accord est mémorisé localement et n'est plus redemandé.
+
+### 🔒 Données personnelles (RGPD)
+
+- Vos **identifiants ne sont ni stockés ni transmis à un tiers**. Ils servent
+  uniquement à la requête de connexion **directe au site**.
+- Aucune donnée n'est envoyée vers un serveur externe : tout reste **entre
+  votre machine et cahier-de-prepa.fr**.
+- Les fichiers téléchargés et les éventuels cookies de session restent **chez
+  vous** ; le `.gitignore` fourni évite de les versionner par accident.
+
+---
+
+## 🚀 Installation
+
+```bash
+git clone https://github.com/Bastien-Gaffet/cdp-scraper.git
+cd cdp-scraper
+pip install -r requirements.txt
+```
+
+Python ≥ 3.8 requis (seule dépendance : `requests`).
+
+> 💡 Si vous oubliez l'installation, le script détecte la dépendance manquante
+> et propose de l'installer pour vous (`pip install requests`) au lancement.
+
+## ▶️ Utilisation
+
+### Mode interactif (le plus simple)
+
+```bash
+python cdp_scraper.py
+```
+
+Le script pose les questions (URL de la classe, identifiant, mot de passe
+masqué, dossier de destination).
+
+### Mode arguments (automatisation)
+
+```bash
+python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe -s ./cours
+python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --simulation
+```
+
+> Conseil : laissez le mot de passe être demandé **interactivement** (saisie
+> masquée) plutôt que de l'écrire dans la ligne de commande.
+
+Les documents sont rangés dans `<dossier>/<nom-de-la-classe>/`, en respectant
+l'arborescence exacte du site.
+
+📖 **Documentation complète** (tous les arguments, fonctionnement du crawl,
+programmes de colles, mode simulation) : [docs/cdp_scraper_doc.md](docs/cdp_scraper_doc.md).
+
+---
+
+## 📄 Licence
+
+Distribué sous licence **CeCILL-2.1** (licence libre française, compatible GPL).
+Voir le fichier [LICENSE](LICENSE).
+
+Le logiciel *Cahier de prépa* est un projet indépendant de Cyril Ravat,
+également sous CeCILL : <https://forge.apps.education.fr/cyrilravat/cahier-de-prepa>.
+
+## 🤝 Contribution
+
+Les retours et contributions sont bienvenus via *issues* et *pull requests*.
+Merci de ne **jamais** inclure de documents de cours, d'identifiants ou de
+cookies dans une contribution.
