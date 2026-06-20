@@ -540,16 +540,21 @@ def ouvrir_ou_reveler(cible: Path):
 class GestionnaireCDP(BaseHTTPRequestHandler):
     """Sert la page, l'API JSON et les fichiers. `self.server.racine` = racine."""
 
-    def _envoyer_octets(self, code: int, octets: bytes, content_type: str):
+    def _envoyer_octets(self, code: int, octets: bytes, content_type: str,
+                        cache: bool = True):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(octets)))
+        if not cache:
+            # Évite qu'un navigateur garde une ancienne version de la page/API
+            # après une mise à jour du viewer (cause de comportements « périmés »).
+            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(octets)
 
     def _envoyer_json(self, code: int, donnees):
         self._envoyer_octets(code, json.dumps(donnees).encode("utf-8"),
-                             "application/json; charset=utf-8")
+                             "application/json; charset=utf-8", cache=False)
 
     def _erreur(self, code: int, message: str):
         self._envoyer_octets(code, message.encode("utf-8"), "text/plain; charset=utf-8")
@@ -560,7 +565,8 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
         racine = self.server.racine
 
         if chemin == "/":
-            self._envoyer_octets(200, PAGE_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            self._envoyer_octets(200, PAGE_HTML.encode("utf-8"),
+                                 "text/html; charset=utf-8", cache=False)
             return
 
         if chemin == "/api/classes":
