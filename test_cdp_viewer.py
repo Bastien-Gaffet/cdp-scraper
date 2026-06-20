@@ -143,6 +143,14 @@ class TestServeur(unittest.TestCase):
             self._get("/file/../secret.txt")
         self.assertEqual(ctx.exception.code, 403)
 
+    def test_page_racine_contient_le_squelette(self):
+        with self._get("/") as r:
+            html = r.read().decode("utf-8")
+        self.assertIn("cdp-viewer", html)
+        self.assertIn("id=\"arbre\"", html)
+        self.assertIn("id=\"apercu\"", html)
+        self.assertIn("/api/classes", html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,7 +11,190 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-PAGE_HTML = "<!doctype html><title>cdp-viewer</title>"  # remplacé en Task 5
+PAGE_HTML = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cdp-viewer</title>
+<style>
+:root {
+  --bg:#f7f7f8; --panel:#fff; --txt:#1d1d1f; --muted:#6b6b70;
+  --border:#e3e3e6; --accent:#2563eb; --hover:#eef2ff;
+}
+[data-theme="dark"] {
+  --bg:#16171a; --panel:#1f2024; --txt:#e7e7ea; --muted:#9a9aa2;
+  --border:#2c2d33; --accent:#6ea0ff; --hover:#262b3b;
+}
+* { box-sizing:border-box; }
+body { margin:0; font:14px/1.5 system-ui,sans-serif; color:var(--txt);
+  background:var(--bg); height:100vh; display:flex; flex-direction:column; }
+header { display:flex; gap:12px; align-items:center; padding:10px 14px;
+  background:var(--panel); border-bottom:1px solid var(--border); }
+header h1 { font-size:16px; margin:0; white-space:nowrap; }
+header .grow { flex:1; }
+select, input, button { font:inherit; color:var(--txt); background:var(--bg);
+  border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
+button { cursor:pointer; }
+main { flex:1; display:flex; min-height:0; }
+#arbre { width:320px; overflow:auto; padding:10px; background:var(--panel);
+  border-right:1px solid var(--border); }
+#apercu { flex:1; overflow:auto; padding:0; display:flex; flex-direction:column; }
+#apercu .vide { margin:auto; color:var(--muted); }
+#apercu iframe, #apercu img { width:100%; flex:1; border:0; }
+#apercu img { object-fit:contain; }
+#apercu pre { margin:0; padding:16px; white-space:pre-wrap; word-break:break-word; }
+.barre { padding:8px 14px; border-bottom:1px solid var(--border);
+  background:var(--panel); display:flex; gap:12px; align-items:center; }
+.dossier > .ligne::before { content:"\25B8 "; color:var(--muted); }
+.dossier.ouvert > .ligne::before { content:"\25BE "; color:var(--muted); }
+.ligne { padding:3px 6px; border-radius:6px; cursor:pointer; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.ligne:hover { background:var(--hover); }
+.ligne.actif { background:var(--accent); color:#fff; }
+.enfants { margin-left:14px; }
+.cache { display:none; }
+a.dl { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>&#128218; cdp-viewer</h1>
+  <select id="classe" title="Classe"></select>
+  <input id="recherche" class="grow" placeholder="&#128269; Rechercher un fichier&hellip;">
+  <button id="theme" title="Mode sombre">&#127769;</button>
+</header>
+<main>
+  <nav id="arbre"></nav>
+  <section id="apercu"><div class="vide">Sélectionnez un fichier à gauche.</div></section>
+</main>
+<script>
+const IMAGES = ["png","jpg","jpeg","gif","webp","svg","bmp"];
+const TEXTES = ["txt","md","markdown","csv","tsv","py","tex","json","log","html","htm","c","cpp","java"];
+const elArbre = document.getElementById("arbre");
+const elApercu = document.getElementById("apercu");
+const elClasse = document.getElementById("classe");
+const elRecherche = document.getElementById("recherche");
+
+function octets(n) {
+  if (n < 1024) return n + " o";
+  if (n < 1048576) return (n/1024).toFixed(1) + " Ko";
+  return (n/1048576).toFixed(1) + " Mo";
+}
+function urlFichier(chemin) {
+  return "/file/" + chemin.split("/").map(encodeURIComponent).join("/");
+}
+
+function rendreNoeud(noeud) {
+  if (noeud.type === "fichier") {
+    const d = document.createElement("div");
+    d.className = "fichier";
+    const l = document.createElement("div");
+    l.className = "ligne";
+    l.textContent = "📄 " + noeud.nom;
+    l.dataset.nom = noeud.nom.toLowerCase();
+    l.onclick = () => { selectionner(l); apercu(noeud); };
+    d.appendChild(l);
+    return d;
+  }
+  const d = document.createElement("div");
+  d.className = "dossier ouvert";
+  const l = document.createElement("div");
+  l.className = "ligne";
+  l.textContent = "📁 " + noeud.nom;
+  l.dataset.nom = noeud.nom.toLowerCase();
+  const enfants = document.createElement("div");
+  enfants.className = "enfants";
+  l.onclick = () => { d.classList.toggle("ouvert"); enfants.classList.toggle("cache"); };
+  (noeud.enfants || []).forEach(e => enfants.appendChild(rendreNoeud(e)));
+  d.appendChild(l);
+  d.appendChild(enfants);
+  return d;
+}
+
+function selectionner(ligne) {
+  document.querySelectorAll(".ligne.actif").forEach(e => e.classList.remove("actif"));
+  ligne.classList.add("actif");
+}
+
+function apercu(noeud) {
+  const url = urlFichier(noeud.chemin);
+  const ext = (noeud.ext || "").toLowerCase();
+  elApercu.innerHTML = "";
+  const barre = document.createElement("div");
+  barre.className = "barre";
+  barre.innerHTML = "<strong>" + noeud.nom + "</strong><span style='color:var(--muted)'>"
+    + (ext ? ext.toUpperCase() + " &middot; " : "") + octets(noeud.taille) + "</span>";
+  const dl = document.createElement("a");
+  dl.className = "dl"; dl.href = url; dl.download = noeud.nom; dl.textContent = "⬇ Télécharger";
+  barre.appendChild(dl);
+  elApercu.appendChild(barre);
+
+  if (ext === "pdf") {
+    const f = document.createElement("iframe"); f.src = url; elApercu.appendChild(f);
+  } else if (IMAGES.includes(ext)) {
+    const i = document.createElement("img"); i.src = url; i.alt = noeud.nom; elApercu.appendChild(i);
+  } else if (TEXTES.includes(ext)) {
+    fetch(url).then(r => r.text()).then(t => {
+      const pre = document.createElement("pre"); pre.textContent = t; elApercu.appendChild(pre);
+    });
+  } else {
+    const p = document.createElement("div"); p.className = "vide";
+    p.innerHTML = "Aperçu indisponible pour ce type.<br>Utilisez « Télécharger ».";
+    elApercu.appendChild(p);
+  }
+}
+
+function filtrer() {
+  const q = elRecherche.value.trim().toLowerCase();
+  document.querySelectorAll("#arbre .fichier").forEach(f => {
+    const nom = f.querySelector(".ligne").dataset.nom;
+    f.classList.toggle("cache", q !== "" && !nom.includes(q));
+  });
+  // Masque les dossiers dont aucun fichier n'est visible.
+  document.querySelectorAll("#arbre .dossier").forEach(d => {
+    const visible = d.querySelector(".fichier:not(.cache)");
+    d.classList.toggle("cache", q !== "" && !visible);
+  });
+}
+
+async function chargerClasse(classe) {
+  elArbre.innerHTML = "Chargement&hellip;";
+  const r = await fetch("/api/tree?classe=" + encodeURIComponent(classe));
+  if (!r.ok) { elArbre.textContent = "Erreur de chargement."; return; }
+  const arbre = await r.json();
+  elArbre.innerHTML = "";
+  (arbre.enfants || []).forEach(e => elArbre.appendChild(rendreNoeud(e)));
+}
+
+async function init() {
+  const r = await fetch("/api/classes");
+  const classes = await r.json();
+  if (!classes.length) {
+    elArbre.innerHTML = "";
+    elApercu.innerHTML = "<div class='vide'>Aucun cours trouvé.<br>Lancez d'abord <code>cdp_scraper.py</code>.</div>";
+    return;
+  }
+  classes.forEach(c => {
+    const o = document.createElement("option"); o.value = c; o.textContent = c; elClasse.appendChild(o);
+  });
+  elClasse.onchange = () => chargerClasse(elClasse.value);
+  chargerClasse(classes[0]);
+}
+
+elRecherche.oninput = filtrer;
+document.getElementById("theme").onclick = () => {
+  const sombre = document.documentElement.getAttribute("data-theme") === "dark";
+  document.documentElement.setAttribute("data-theme", sombre ? "light" : "dark");
+  localStorage.setItem("cdp-theme", sombre ? "light" : "dark");
+};
+if (localStorage.getItem("cdp-theme") === "dark")
+  document.documentElement.setAttribute("data-theme", "dark");
+
+init();
+</script>
+</body>
+</html>"""
 
 
 def resoudre_dans_racine(racine: Path, demande: str) -> Path | None:
