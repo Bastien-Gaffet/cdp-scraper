@@ -149,7 +149,6 @@ class TestServeur(unittest.TestCase):
         self.assertIn("cdp-viewer", html)
         self.assertIn("id=\"rubriques\"", html)
         self.assertIn("id=\"explorateur\"", html)
-        self.assertIn("id=\"document\"", html)
         self.assertIn("/api/classes", html)
 
 

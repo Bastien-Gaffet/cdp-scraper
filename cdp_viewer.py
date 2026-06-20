@@ -38,44 +38,34 @@ header .grow { flex:1; }
 select, input, button { font:inherit; color:var(--txt); background:var(--bg);
   border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
 button { cursor:pointer; }
+a { color:inherit; text-decoration:none; }
 main { flex:1; display:flex; min-height:0; }
 
 #rubriques { width:240px; overflow:auto; padding:10px; background:var(--panel);
   border-right:1px solid var(--border); flex-shrink:0; }
-.rubrique { padding:8px 10px; border-radius:8px; cursor:pointer; white-space:nowrap;
+.rubrique { display:block; padding:8px 10px; border-radius:8px; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
 .rubrique:hover { background:var(--hover); }
 .rubrique.actif { background:var(--accent); color:#fff; }
 
-#explorateur { flex:1; overflow:auto; padding:16px; }
+#explorateur { flex:1; overflow:auto; padding:16px 24px; }
 .fil { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-bottom:16px;
   color:var(--muted); }
-.fil a { color:var(--accent); cursor:pointer; text-decoration:none; }
+.fil a { color:var(--accent); }
 .fil a:hover { text-decoration:underline; }
 .fil .sep { color:var(--muted); }
-.grille { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; }
-.carte { display:flex; align-items:center; gap:10px; padding:12px; border-radius:10px;
-  border:1px solid var(--border); background:var(--panel); cursor:pointer; min-width:0; }
-.carte:hover { background:var(--hover); border-color:var(--accent); }
-.carte .ico { font-size:22px; flex-shrink:0; }
-.carte .info { min-width:0; }
-.carte .nom { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.carte .meta { color:var(--muted); font-size:12px; }
-.vide { color:var(--muted); padding:24px 0; }
+.fil .courant { color:var(--txt); }
 
-#document { position:fixed; inset:0; z-index:50; background:var(--bg);
-  display:flex; flex-direction:column; }
-#document .barre { display:flex; gap:14px; align-items:center; padding:10px 14px;
-  background:var(--panel); border-bottom:1px solid var(--border); }
-#document .barre .titre { font-weight:600; white-space:nowrap; overflow:hidden;
-  text-overflow:ellipsis; flex:1; }
-#document .corps { flex:1; overflow:auto; display:flex; flex-direction:column; }
-#document iframe, #document img { width:100%; flex:1; border:0; }
-#document img { object-fit:contain; }
-#document pre { margin:0; padding:16px; white-space:pre-wrap; word-break:break-word; }
-#document .corps .vide { margin:auto; text-align:center; }
-a.dl { color:var(--accent); text-decoration:none; }
-.cache { display:none !important; }
+.liste { display:flex; flex-direction:column; }
+.ligne { display:flex; align-items:baseline; gap:8px; padding:7px 8px;
+  border-bottom:1px solid var(--border); }
+.ligne:hover { background:var(--hover); }
+.ligne .ico { font-size:16px; flex-shrink:0; }
+.ligne .nom { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ligne.dossier .nom { font-weight:600; }
+.ligne .meta { color:var(--muted); font-size:12px; margin-left:auto; flex-shrink:0;
+  padding-left:12px; }
+.vide { color:var(--muted); padding:24px 0; }
 </style>
 </head>
 <body>
@@ -89,211 +79,189 @@ a.dl { color:var(--accent); text-decoration:none; }
   <nav id="rubriques"></nav>
   <section id="explorateur"></section>
 </main>
-<div id="document" class="cache">
-  <div class="barre">
-    <button id="retour">&#8592; Retour</button>
-    <span class="titre" id="doc-titre"></span>
-    <a class="dl" id="doc-dl" download>&#11015; Télécharger</a>
-  </div>
-  <div class="corps" id="doc-corps"></div>
-</div>
 <script>
-const IMAGES = ["png","jpg","jpeg","gif","webp","svg","bmp"];
-const TEXTES = ["txt","md","markdown","csv","tsv","py","tex","json","log","html","htm","c","cpp","java"];
 const elRubriques = document.getElementById("rubriques");
 const elExplorateur = document.getElementById("explorateur");
 const elClasse = document.getElementById("classe");
 const elRecherche = document.getElementById("recherche");
-const elDocument = document.getElementById("document");
 
-let arbreClasse = null;   // nœud racine de la classe courante
-let chemin = [];          // pile de dossiers depuis la racine de la classe
+let arbres = {};          // cache : nom de classe -> nœud racine
+let classesDispo = [];
 
 function octets(n) {
   if (n < 1024) return n + " o";
   if (n < 1048576) return (n/1024).toFixed(1) + " Ko";
   return (n/1048576).toFixed(1) + " Mo";
 }
+// Lien navigable : un dossier pointe vers un hash (#chemin), un document vers
+// une vraie URL /file/... (navigation réelle => retour via le navigateur).
 function urlFichier(c) {
   return "/file/" + c.split("/").map(encodeURIComponent).join("/");
 }
-function dossierCourant() {
-  return chemin.length ? chemin[chemin.length - 1] : arbreClasse;
+function hashDe(chemin) {
+  return "#" + chemin.split("/").map(encodeURIComponent).join("/");
+}
+function nbElements(noeud) {
+  const n = (noeud.enfants || []).length;
+  return n + (n > 1 ? " éléments" : " élément");
 }
 function tri(enfants) {
   return (enfants || []).slice().sort(
     (a, b) => (a.type !== "dossier") - (b.type !== "dossier")
               || a.nom.localeCompare(b.nom, "fr", {sensitivity:"base"}));
 }
-
-// ── Carte d'un élément (dossier ou fichier) ─────────────────────────────────
-function carte(noeud) {
-  const c = document.createElement("div");
-  c.className = "carte";
-  const dossier = noeud.type === "dossier";
-  const ico = document.createElement("span");
-  ico.className = "ico";
-  ico.textContent = dossier ? "📁" : "📄";
-  const info = document.createElement("div");
-  info.className = "info";
-  const nom = document.createElement("div");
-  nom.className = "nom"; nom.textContent = noeud.nom; nom.title = noeud.nom;
-  info.appendChild(nom);
-  if (!dossier) {
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = (noeud.ext ? noeud.ext.toUpperCase() + " · " : "") + octets(noeud.taille);
-    info.appendChild(meta);
-  }
-  c.appendChild(ico); c.appendChild(info);
-  c.onclick = dossier ? () => { chemin.push(noeud); rendreExplorateur(); }
-                      : () => ouvrirDocument(noeud);
-  return c;
+function trouver(noeud, chemin) {
+  if (noeud.chemin === chemin) return noeud;
+  for (const e of (noeud.enfants || []))
+    if (e.type === "dossier") { const t = trouver(e, chemin); if (t) return t; }
+  return null;
 }
 
-// ── Fil d'Ariane ────────────────────────────────────────────────────────────
-function rendreFil() {
+// ── Une ligne de la liste (dossier ou document) ─────────────────────────────
+function ligne(noeud) {
+  const dossier = noeud.type === "dossier";
+  const a = document.createElement("a");
+  a.className = "ligne " + (dossier ? "dossier" : "doc");
+  a.href = dossier ? hashDe(noeud.chemin) : urlFichier(noeud.chemin);
+  const ico = document.createElement("span");
+  ico.className = "ico"; ico.textContent = dossier ? "📁" : "📄";
+  const nom = document.createElement("span");
+  nom.className = "nom"; nom.textContent = noeud.nom; nom.title = noeud.nom;
+  const meta = document.createElement("span");
+  meta.className = "meta";
+  meta.textContent = dossier ? "(" + nbElements(noeud) + ")"
+    : "(" + (noeud.ext ? noeud.ext.toUpperCase() + " · " : "") + octets(noeud.taille) + ")";
+  a.appendChild(ico); a.appendChild(nom); a.appendChild(meta);
+  return a;
+}
+
+// ── Fil d'Ariane (chaque segment = un hash) ─────────────────────────────────
+function rendreFil(arbre, cible) {
   const fil = document.createElement("div");
   fil.className = "fil";
-  const accueil = document.createElement("a");
-  accueil.textContent = "🏠 " + (arbreClasse ? arbreClasse.nom : "Accueil");
-  accueil.onclick = () => { chemin = []; rendreExplorateur(); rendreRubriques(); };
-  fil.appendChild(accueil);
-  chemin.forEach((d, i) => {
-    const sep = document.createElement("span"); sep.className = "sep"; sep.textContent = "/";
-    fil.appendChild(sep);
-    const a = document.createElement("a"); a.textContent = d.nom;
-    a.onclick = () => { chemin = chemin.slice(0, i + 1); rendreExplorateur(); };
-    fil.appendChild(a);
+  const segs = cible.chemin.split("/");
+  segs.forEach((seg, i) => {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "sep"; sep.textContent = "/"; fil.appendChild(sep);
+    }
+    const prefixe = segs.slice(0, i + 1).join("/");
+    const label = i === 0 ? "🏠 " + seg : seg;
+    if (i === segs.length - 1) {
+      const span = document.createElement("span");
+      span.className = "courant"; span.textContent = label; fil.appendChild(span);
+    } else {
+      const a = document.createElement("a");
+      a.textContent = label; a.href = hashDe(prefixe); fil.appendChild(a);
+    }
   });
   return fil;
 }
 
-// ── Vue explorateur (contenu du dossier courant) ────────────────────────────
-function rendreExplorateur() {
+// ── Vue liste du dossier courant ────────────────────────────────────────────
+function rendreListe(arbre, cible) {
   elExplorateur.innerHTML = "";
-  if (!arbreClasse) return;
-  elExplorateur.appendChild(rendreFil());
-  const enfants = tri(dossierCourant().enfants);
+  elExplorateur.appendChild(rendreFil(arbre, cible));
+  const enfants = tri(cible.enfants);
   if (!enfants.length) {
     const v = document.createElement("div"); v.className = "vide";
     v.textContent = "Dossier vide.";
     elExplorateur.appendChild(v);
     return;
   }
-  const grille = document.createElement("div"); grille.className = "grille";
-  enfants.forEach(e => grille.appendChild(carte(e)));
-  elExplorateur.appendChild(grille);
-  rendreRubriques();
+  const liste = document.createElement("div"); liste.className = "liste";
+  enfants.forEach(e => liste.appendChild(ligne(e)));
+  elExplorateur.appendChild(liste);
 }
 
-// ── Recherche (tous les fichiers de la classe par nom) ──────────────────────
+// ── Rubriques (dossiers de 1er niveau) ──────────────────────────────────────
+function rendreRubriques(arbre, cible) {
+  elRubriques.innerHTML = "";
+  const segs = cible.chemin.split("/");
+  const actifTop = segs.length > 1 ? segs[1] : null;
+  const accueil = document.createElement("a");
+  accueil.className = "rubrique" + (actifTop === null ? " actif" : "");
+  accueil.textContent = "🏠 Accueil";
+  accueil.href = hashDe(arbre.chemin);
+  elRubriques.appendChild(accueil);
+  tri(arbre.enfants).filter(e => e.type === "dossier").forEach(d => {
+    const r = document.createElement("a");
+    r.className = "rubrique" + (d.nom === actifTop ? " actif" : "");
+    r.textContent = "📁 " + d.nom; r.title = d.nom;
+    r.href = hashDe(d.chemin);
+    elRubriques.appendChild(r);
+  });
+}
+
+// ── Recherche (tous les documents de la classe par nom) ─────────────────────
 function collecter(noeud, acc) {
   (noeud.enfants || []).forEach(e => {
     if (e.type === "dossier") collecter(e, acc); else acc.push(e);
   });
   return acc;
 }
-function rechercher(q) {
+function rechercher(arbre, q) {
   elExplorateur.innerHTML = "";
   const fil = document.createElement("div"); fil.className = "fil";
   fil.textContent = "Résultats pour « " + q + " »";
   elExplorateur.appendChild(fil);
-  const trouves = collecter(arbreClasse, []).filter(f => f.nom.toLowerCase().includes(q));
+  const trouves = collecter(arbre, []).filter(f => f.nom.toLowerCase().includes(q));
   if (!trouves.length) {
     const v = document.createElement("div"); v.className = "vide";
     v.textContent = "Aucun document ne correspond.";
     elExplorateur.appendChild(v);
     return;
   }
-  const grille = document.createElement("div"); grille.className = "grille";
+  const liste = document.createElement("div"); liste.className = "liste";
   trouves.sort((a, b) => a.nom.localeCompare(b.nom, "fr", {sensitivity:"base"}))
-         .forEach(f => grille.appendChild(carte(f)));
-  elExplorateur.appendChild(grille);
+         .forEach(f => liste.appendChild(ligne(f)));
+  elExplorateur.appendChild(liste);
 }
 
-// ── Rubriques (1er niveau seulement) ────────────────────────────────────────
-function rendreRubriques() {
-  elRubriques.innerHTML = "";
-  if (!arbreClasse) return;
-  const accueil = document.createElement("div");
-  accueil.className = "rubrique" + (chemin.length === 0 ? " actif" : "");
-  accueil.textContent = "🏠 Accueil";
-  accueil.onclick = () => { chemin = []; rendreExplorateur(); };
-  elRubriques.appendChild(accueil);
-  tri(arbreClasse.enfants).filter(e => e.type === "dossier").forEach(d => {
-    const r = document.createElement("div");
-    r.className = "rubrique" + (chemin[0] === d ? " actif" : "");
-    r.textContent = "📁 " + d.nom; r.title = d.nom;
-    r.onclick = () => { chemin = [d]; rendreExplorateur(); };
-    elRubriques.appendChild(r);
-  });
-}
-
-// ── Ouverture d'un document en plein écran ──────────────────────────────────
-function ouvrirDocument(noeud) {
-  const url = urlFichier(noeud.chemin);
-  const ext = (noeud.ext || "").toLowerCase();
-  document.getElementById("doc-titre").textContent = noeud.nom;
-  const dl = document.getElementById("doc-dl");
-  dl.href = url; dl.setAttribute("download", noeud.nom);
-  const corps = document.getElementById("doc-corps");
-  corps.innerHTML = "";
-  if (ext === "pdf") {
-    const f = document.createElement("iframe"); f.src = url; corps.appendChild(f);
-  } else if (IMAGES.includes(ext)) {
-    const i = document.createElement("img"); i.src = url; i.alt = noeud.nom; corps.appendChild(i);
-  } else if (TEXTES.includes(ext)) {
-    fetch(url).then(r => r.text()).then(t => {
-      const pre = document.createElement("pre"); pre.textContent = t; corps.appendChild(pre);
-    });
-  } else {
-    const v = document.createElement("div"); v.className = "vide";
-    v.innerHTML = "Aperçu indisponible pour ce type.<br>Utilisez « Télécharger ».";
-    corps.appendChild(v);
+// ── Routage : le hash de l'URL porte le dossier courant ─────────────────────
+async function naviguer() {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  const classe = hash.split("/")[0] || classesDispo[0];
+  if (!classe) return;
+  if (!arbres[classe]) {
+    const r = await fetch("/api/tree?classe=" + encodeURIComponent(classe));
+    if (r.ok) arbres[classe] = await r.json();
   }
-  elDocument.classList.remove("cache");
-}
-function fermerDocument() {
-  elDocument.classList.add("cache");
-  document.getElementById("doc-corps").innerHTML = "";
-}
-
-// ── Chargement / init ───────────────────────────────────────────────────────
-async function chargerClasse(classe) {
-  elExplorateur.innerHTML = "Chargement…";
-  const r = await fetch("/api/tree?classe=" + encodeURIComponent(classe));
-  if (!r.ok) { elExplorateur.textContent = "Erreur de chargement."; return; }
-  arbreClasse = await r.json();
-  chemin = [];
+  const arbre = arbres[classe];
+  if (!arbre) {                       // classe inconnue (lien périmé)
+    if (classesDispo.length) location.hash = encodeURIComponent(classesDispo[0]);
+    return;
+  }
+  if (elClasse.value !== classe) elClasse.value = classe;
   elRecherche.value = "";
-  rendreRubriques();
-  rendreExplorateur();
+  const cible = trouver(arbre, hash) || arbre;
+  rendreRubriques(arbre, cible);
+  rendreListe(arbre, cible);
 }
 
 async function init() {
   const r = await fetch("/api/classes");
-  const classes = await r.json();
-  if (!classes.length) {
+  classesDispo = await r.json();
+  if (!classesDispo.length) {
     elExplorateur.innerHTML =
       "<div class='vide'>Aucun cours trouvé.<br>Lancez d'abord <code>cdp_scraper.py</code>.</div>";
     return;
   }
-  classes.forEach(c => {
+  classesDispo.forEach(c => {
     const o = document.createElement("option"); o.value = c; o.textContent = c; elClasse.appendChild(o);
   });
-  elClasse.onchange = () => chargerClasse(elClasse.value);
-  chargerClasse(classes[0]);
+  elClasse.onchange = () => { location.hash = encodeURIComponent(elClasse.value); };
+  if (location.hash) naviguer();
+  else location.hash = encodeURIComponent(classesDispo[0]);
 }
 
+window.addEventListener("hashchange", naviguer);
 elRecherche.oninput = () => {
   const q = elRecherche.value.trim().toLowerCase();
-  if (q === "") rendreExplorateur(); else rechercher(q);
+  const arbre = arbres[elClasse.value];
+  if (!arbre) return;
+  if (q === "") naviguer(); else rechercher(arbre, q);
 };
-document.getElementById("retour").onclick = fermerDocument;
-document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && !elDocument.classList.contains("cache")) fermerDocument();
-});
 document.getElementById("theme").onclick = () => {
   const sombre = document.documentElement.getAttribute("data-theme") === "dark";
   document.documentElement.setAttribute("data-theme", sombre ? "light" : "dark");
