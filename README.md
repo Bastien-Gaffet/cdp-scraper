@@ -119,12 +119,15 @@ python cdp_viewer.py --port 8080 --no-browser
 Le navigateur s'ouvre sur `http://127.0.0.1:8000`. Choisissez la classe en haut,
 naviguez dans l'arbre à gauche, l'aperçu s'affiche à droite.
 
-- Les fichiers **GeoGebra** (`.ggb`) s'ouvrent dans un nouvel onglet via
-  l'applet **GeoGebra en ligne** (le fichier reste servi localement, son contenu
-  n'est pas envoyé à un tiers).
-- Les autres fichiers non affichables par le navigateur (ex. `.docx`) s'ouvrent
-  dans l'application associée si elle est installée, sinon le fichier est
-  **révélé dans l'explorateur** (jamais de téléchargement silencieux).
+- Les fichiers **GeoGebra** (`.ggb`) et **Python** (`.py`) s'ouvrent dans un
+  nouvel onglet, respectivement via **GeoGebra en ligne** et la **console
+  Basthon** (le fichier reste servi localement ; pour Python, le code est passé
+  à Basthon, rien n'est envoyé à un autre tiers par l'outil).
+- **Repli en cascade** si l'application en ligne est injoignable (pas d'accès
+  Internet) : on tente l'**application installée** sur le PC, puis à défaut on
+  **révèle le fichier dans l'explorateur**.
+- Les autres fichiers non affichables par le navigateur (ex. `.docx`) suivent la
+  même logique appli installée → explorateur (jamais de téléchargement silencieux).
 
 ---
 

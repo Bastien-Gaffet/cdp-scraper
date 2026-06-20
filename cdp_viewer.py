@@ -119,9 +119,11 @@ function elIcone(nom) {
 function urlReveal(c) {
   return "/reveal/" + c.split("/").map(encodeURIComponent).join("/");
 }
-function urlGgb(c) {
-  return "/ggb/" + c.split("/").map(encodeURIComponent).join("/");
+function urlOuvrir(c) {
+  return "/ouvrir/" + c.split("/").map(encodeURIComponent).join("/");
 }
+// Types ouverts en ligne (nouvel onglet) avec repli appli PC / explorateur.
+const EN_LIGNE = { ggb: "GeoGebra (en ligne)", py: "Basthon — Python en ligne" };
 
 function octets(n) {
   if (n < 1024) return n + " o";
@@ -157,13 +159,14 @@ function ligne(noeud) {
   const dossier = noeud.type === "dossier";
   const a = document.createElement("a");
   a.className = "ligne " + (dossier ? "dossier" : "doc");
+  const ext = (noeud.ext || "").toLowerCase();
   if (dossier) {
     a.href = hashDe(noeud.chemin);                       // navigation dans l'arbre
-  } else if ((noeud.ext || "").toLowerCase() === "ggb") {
-    a.href = urlGgb(noeud.chemin);                       // GeoGebra en ligne, nouvel onglet
+  } else if (EN_LIGNE[ext]) {
+    a.href = urlOuvrir(noeud.chemin);                    // appli en ligne, nouvel onglet
     a.target = "_blank"; a.rel = "noopener";
-    a.title = "Ouvrir dans GeoGebra (en ligne, nouvel onglet)";
-  } else if (VISIONNABLES.has((noeud.ext || "").toLowerCase())) {
+    a.title = "Ouvrir dans " + EN_LIGNE[ext] + " — repli : application installée, sinon explorateur";
+  } else if (VISIONNABLES.has(ext)) {
     a.href = urlFichier(noeud.chemin);                   // ouverture pleine page
   } else {
     a.href = urlReveal(noeud.chemin);                    // ouvrir (ou révéler dans l'explorateur)
@@ -323,37 +326,84 @@ init();
 </html>"""
 
 
-# Page d'ouverture d'un .ggb via l'applet GeoGebra en ligne. Le script de
-# l'applet vient de geogebra.org, mais le fichier .ggb est chargé depuis le
-# serveur local (127.0.0.1) : son contenu n'est pas envoyé à un tiers, il est
-# seulement rendu côté navigateur par l'applet.
-PAGE_GGB = r"""<!doctype html>
+# Page d'ouverture d'un fichier dans une application en ligne (GeoGebra pour les
+# .ggb, Basthon pour les .py), avec repli en cascade : si l'application en ligne
+# est injoignable (pas d'accès Internet), on tente l'application installée sur le
+# PC, et à défaut on révèle le fichier dans l'explorateur (route /reveal).
+#
+# Confidentialité : les scripts (deployggb.js / la console Basthon) viennent de
+# leurs sites respectifs, mais le contenu du fichier est lu depuis le serveur
+# local (127.0.0.1) — pour Basthon, le code est passé en paramètre `script`
+# (base64) à la console. Le contenu n'est donc pas envoyé à un tiers par nos soins.
+PAGE_EXTERNE = r"""<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>__NOM__ — GeoGebra</title>
-<style>html,body{margin:0;height:100%;background:#fff;overflow:hidden}</style>
-<script src="https://www.geogebra.org/apps/deployggb.js"></script>
+<title>__TITRE__</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff;overflow:hidden;
+    font:14px/1.5 system-ui,sans-serif;color:#1d1d1f}
+  #ggb{width:100%;height:100vh}
+  #msg{display:flex;align-items:center;justify-content:center;height:100vh;
+    text-align:center;padding:24px}
+</style>
 </head>
 <body>
 <div id="ggb"></div>
+<div id="msg" hidden></div>
 <script>
-const applet = new GGBApplet({
-  appName: "classic",
-  filename: __FICHIER__,
-  width: window.innerWidth,
-  height: window.innerHeight,
-  showToolBar: true,
-  showMenuBar: true,
-  showAlgebraInput: true,
-  errorDialogsActive: true
-}, true);
-window.addEventListener("load", () => applet.inject("ggb"));
-window.addEventListener("resize", () => {
-  const o = applet.getAppletObject ? applet.getAppletObject() : null;
-  if (o && o.setSize) o.setSize(window.innerWidth, window.innerHeight);
-});
+const MODE = "__MODE__";       // "ggb" | "py"
+const FICHIER = __FICHIER__;   // URL /file/... (même origine)
+const REVEAL  = __REVEAL__;    // URL /reveal/... (appli PC, sinon explorateur)
+const GGB_SRC = "https://www.geogebra.org/apps/deployggb.js";
+const BASTHON = "https://console.basthon.fr/?script=";
+
+function montrer(t) {
+  document.getElementById("ggb").hidden = true;
+  const m = document.getElementById("msg");
+  m.textContent = t; m.hidden = false;
+}
+function repli() {
+  montrer("Application en ligne indisponible. Ouverture sur votre ordinateur…");
+  fetch(REVEAL).catch(() => {});
+}
+// « En ligne » = navigateur connecté ET service joignable (fetch no-cors :
+// résout si joignable, lève une erreur réseau sinon — sans souci de CORS).
+async function enLigne(url) {
+  if (!navigator.onLine) return false;
+  try { await fetch(url, {mode: "no-cors", cache: "no-store"}); return true; }
+  catch (e) { return false; }
+}
+function chargerScript(src) {
+  return new Promise((ok, ko) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = ok; s.onerror = ko;
+    document.head.appendChild(s);
+  });
+}
+function b64utf8(s) { return btoa(unescape(encodeURIComponent(s))); }
+
+(async () => {
+  if (MODE === "ggb") {
+    if (!(await enLigne(GGB_SRC))) return repli();
+    try { await chargerScript(GGB_SRC); } catch (e) { return repli(); }
+    new GGBApplet({
+      appName: "classic", filename: FICHIER,
+      width: window.innerWidth, height: window.innerHeight,
+      showToolBar: true, showMenuBar: true, showAlgebraInput: true,
+      errorDialogsActive: true
+    }, true).inject("ggb");
+  } else {
+    let code = null;
+    try { code = await (await fetch(FICHIER)).text(); } catch (e) {}
+    if (code !== null && await enLigne(BASTHON)) {
+      location.replace(BASTHON + encodeURIComponent(b64utf8(code)));
+    } else {
+      repli();
+    }
+  }
+})();
 </script>
 </body>
 </html>"""
@@ -527,8 +577,8 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             self._envoyer_json(200, arbre)
             return
 
-        if chemin.startswith("/ggb/"):
-            rel = urllib.parse.unquote(chemin[len("/ggb/"):])
+        if chemin.startswith("/ouvrir/"):
+            rel = urllib.parse.unquote(chemin[len("/ouvrir/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
                 self._erreur(403, "Acces refuse")
@@ -536,11 +586,14 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             if not cible.is_file():
                 self._erreur(404, "Fichier introuvable")
                 return
-            url_fichier = "/file/" + "/".join(
-                urllib.parse.quote(seg) for seg in rel.split("/"))
-            page = (PAGE_GGB
-                    .replace("__FICHIER__", json.dumps(url_fichier))
-                    .replace("__NOM__", html.escape(cible.name)))
+            ext = cible.suffix.lstrip(".").lower()
+            mode = "ggb" if ext == "ggb" else "py"
+            enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
+            page = (PAGE_EXTERNE
+                    .replace("__MODE__", mode)
+                    .replace("__TITRE__", html.escape(cible.name))
+                    .replace("__FICHIER__", json.dumps("/file/" + enc))
+                    .replace("__REVEAL__", json.dumps("/reveal/" + enc)))
             self._envoyer_octets(200, page.encode("utf-8"), "text/html; charset=utf-8")
             return
 
