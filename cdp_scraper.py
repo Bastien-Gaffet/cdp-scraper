@@ -247,10 +247,17 @@ def analyser_page(html_page: str, url_page: str):
             type_ = ""
             if don_m:
                 type_ = don_m.group(1).split(",")[0].strip().lower()
+            id_doc = id_m.group(1)
+            # Pour audio/vidéo/py/sql, le bloc <p class="doc"> contient D'ABORD un
+            # lien « icon-play » en download?id=N&voir (page lecteur HTML, ou
+            # redirection Basthon) AVANT le vrai lien de téléchargement. On ne se
+            # fie donc pas au premier href : on reconstruit une URL propre depuis
+            # l'id et on force &dl (download.php renvoie alors le binaire brut,
+            # quel que soit le type, sans page lecteur ni redirection).
             documents.append({
-                "url":  url_abs,
-                "id":   id_m.group(1),
-                "nom":  nom or f"document_{id_m.group(1)}",
+                "url":  urljoin(url_page, f"download?id={id_doc}&dl"),
+                "id":   id_doc,
+                "nom":  nom or f"document_{id_doc}",
                 "type": type_,
             })
 
@@ -379,7 +386,7 @@ def crawler_progcolles(session: requests.Session, base: str):
         if liens:  # mode PDF par semaine
             for did, nom in liens.items():
                 resultat.append({
-                    "url":    f"{base}/download?id={did}",
+                    "url":    f"{base}/download?id={did}&dl",
                     "id":     did,
                     "nom":    nom,
                     "type":   "pdf",

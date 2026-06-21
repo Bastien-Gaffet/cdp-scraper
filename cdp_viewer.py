@@ -1,0 +1,929 @@
+#!/usr/bin/env python3
+"""cdp_viewer — visualiseur web local des cours téléchargés par cdp_scraper.
+
+Sert l'arborescence cours_cdp/<classe>/... dans le navigateur. Bibliothèque
+standard uniquement, serveur lié à 127.0.0.1.
+"""
+import argparse
+import html
+import io
+import json
+import keyword
+import mimetypes
+import os
+import shlex
+import shutil
+import socketserver
+import subprocess
+import sys
+import tokenize
+import urllib.parse
+import webbrowser
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
+
+PAGE_HTML = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cdp-viewer</title>
+<style>
+:root {
+  --bg:#f7f7f8; --panel:#fff; --txt:#1d1d1f; --muted:#6b6b70;
+  --border:#e3e3e6; --accent:#2563eb; --hover:#eef2ff;
+}
+[data-theme="dark"] {
+  --bg:#16171a; --panel:#1f2024; --txt:#e7e7ea; --muted:#9a9aa2;
+  --border:#2c2d33; --accent:#6ea0ff; --hover:#262b3b;
+}
+* { box-sizing:border-box; }
+body { margin:0; font:14px/1.5 system-ui,sans-serif; color:var(--txt);
+  background:var(--bg); height:100vh; display:flex; flex-direction:column; }
+header { display:flex; gap:12px; align-items:center; padding:10px 14px;
+  background:var(--panel); border-bottom:1px solid var(--border); }
+header h1 { font-size:16px; margin:0; white-space:nowrap; }
+header .grow { flex:1; }
+select, input, button { font:inherit; color:var(--txt); background:var(--bg);
+  border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
+button { cursor:pointer; }
+a { color:inherit; text-decoration:none; }
+main { flex:1; display:flex; min-height:0; }
+
+#rubriques { width:240px; overflow:auto; padding:10px; background:var(--panel);
+  border-right:1px solid var(--border); flex-shrink:0; }
+.rubrique { display:block; padding:8px 10px; border-radius:8px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
+.rubrique:hover { background:var(--hover); }
+.rubrique.actif { background:var(--accent); color:#fff; }
+.rubrique .ico { color:var(--accent); }
+.rubrique.actif .ico { color:#fff; }
+
+#explorateur { flex:1; overflow:auto; padding:16px 24px; }
+.fil { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-bottom:16px;
+  color:var(--txt); }
+.fil a { color:var(--txt); }
+.fil a:hover { text-decoration:underline; }
+.fil .sep { color:var(--muted); }
+.fil .courant { color:var(--txt); }
+
+.liste { display:flex; flex-direction:column; }
+.ligne { display:flex; align-items:center; gap:10px; padding:8px;
+  border-bottom:1px solid var(--border); }
+.ligne:hover { background:var(--hover); }
+.ico { display:inline-flex; align-items:center; flex-shrink:0; color:var(--muted); }
+.ico svg { display:block; }
+.ligne.dossier .ico { color:var(--accent); }
+.ligne .nom { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ligne.dossier .nom { font-weight:600; }
+.ligne .meta { color:var(--muted); font-size:12px; margin-left:auto; flex-shrink:0;
+  padding-left:12px; }
+.vide { color:var(--muted); padding:24px 0; }
+#theme { display:inline-flex; align-items:center; }
+.fil a, .fil .courant { display:inline-flex; align-items:center; gap:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>cdp-viewer</h1>
+  <select id="classe" title="Classe"></select>
+  <input id="recherche" class="grow" placeholder="Rechercher un document&hellip;">
+  <button id="theme" title="Mode sombre"></button>
+</header>
+<main>
+  <nav id="rubriques"></nav>
+  <section id="explorateur"></section>
+</main>
+<script>
+const elRubriques = document.getElementById("rubriques");
+const elExplorateur = document.getElementById("explorateur");
+const elClasse = document.getElementById("classe");
+const elRecherche = document.getElementById("recherche");
+
+let arbres = {};          // cache : nom de classe -> nœud racine
+let classesDispo = [];
+
+// Icônes SVG (suivent la couleur du texte, sans emoji).
+const ICONES = {
+  dossier: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z"/></svg>',
+  document: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M7 3h7l5 5v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>',
+  accueil: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9"/></svg>',
+  theme: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+};
+// Extensions que le navigateur sait afficher (sinon : ouverture dans l'explorateur).
+const VISIONNABLES = new Set([
+  "pdf","png","jpg","jpeg","gif","webp","svg","bmp","ico",
+  "txt","md","markdown","csv","tsv","py","tex","json","log","c","cpp","java","ml","sql","r",
+  "html","htm","mp3","wav","ogg","mp4","webm","m4a","mov"
+]);
+function elIcone(nom) {
+  const s = document.createElement("span");
+  s.className = "ico"; s.innerHTML = ICONES[nom];
+  return s;
+}
+function urlReveal(c) {
+  return "/reveal/" + c.split("/").map(encodeURIComponent).join("/");
+}
+function urlOuvrir(c) {   // .ggb : GeoGebra en ligne (repli appli PC / explorateur)
+  return "/ouvrir/" + c.split("/").map(encodeURIComponent).join("/");
+}
+function urlCode(c) {     // .py : affichage du code colorisé (pleine page)
+  return "/code/" + c.split("/").map(encodeURIComponent).join("/");
+}
+
+function octets(n) {
+  if (n < 1024) return n + " o";
+  if (n < 1048576) return (n/1024).toFixed(1) + " Ko";
+  return (n/1048576).toFixed(1) + " Mo";
+}
+// Lien navigable : un dossier pointe vers un hash (#chemin), un document vers
+// une vraie URL /file/... (navigation réelle => retour via le navigateur).
+function urlFichier(c) {
+  return "/file/" + c.split("/").map(encodeURIComponent).join("/");
+}
+function hashDe(chemin) {
+  return "#" + chemin.split("/").map(encodeURIComponent).join("/");
+}
+function nbElements(noeud) {
+  const n = (noeud.enfants || []).length;
+  return n + (n > 1 ? " éléments" : " élément");
+}
+function tri(enfants) {
+  return (enfants || []).slice().sort(
+    (a, b) => (a.type !== "dossier") - (b.type !== "dossier")
+              || a.nom.localeCompare(b.nom, "fr", {sensitivity:"base"}));
+}
+function trouver(noeud, chemin) {
+  if (noeud.chemin === chemin) return noeud;
+  for (const e of (noeud.enfants || []))
+    if (e.type === "dossier") { const t = trouver(e, chemin); if (t) return t; }
+  return null;
+}
+
+// ── Une ligne de la liste (dossier ou document) ─────────────────────────────
+function ligne(noeud) {
+  const dossier = noeud.type === "dossier";
+  const a = document.createElement("a");
+  a.className = "ligne " + (dossier ? "dossier" : "doc");
+  const ext = (noeud.ext || "").toLowerCase();
+  if (dossier) {
+    a.href = hashDe(noeud.chemin);                       // navigation dans l'arbre
+  } else if (ext === "ggb") {
+    a.href = urlOuvrir(noeud.chemin);                    // GeoGebra en ligne, nouvel onglet
+    a.target = "_blank"; a.rel = "noopener";
+    a.title = "Ouvrir dans GeoGebra (en ligne) — repli : application installée, sinon explorateur";
+  } else if (ext === "py") {
+    a.href = urlCode(noeud.chemin);                      // code Python colorisé, pleine page
+    a.title = "Afficher le code (coloré)";
+  } else if (VISIONNABLES.has(ext)) {
+    a.href = urlFichier(noeud.chemin);                   // ouverture pleine page
+  } else {
+    a.href = urlReveal(noeud.chemin);                    // ouvrir (ou révéler dans l'explorateur)
+    a.title = "Ouvrir avec l'application associée, sinon afficher dans l'explorateur";
+    a.onclick = (e) => { e.preventDefault(); fetch(urlReveal(noeud.chemin)); };
+  }
+  const nom = document.createElement("span");
+  nom.className = "nom"; nom.textContent = noeud.nom;
+  const meta = document.createElement("span");
+  meta.className = "meta";
+  meta.textContent = dossier ? "(" + nbElements(noeud) + ")"
+    : "(" + (noeud.ext ? noeud.ext.toUpperCase() + " · " : "") + octets(noeud.taille) + ")";
+  a.appendChild(elIcone(dossier ? "dossier" : "document"));
+  a.appendChild(nom); a.appendChild(meta);
+  return a;
+}
+
+// ── Fil d'Ariane (chaque segment = un hash) ─────────────────────────────────
+function rendreFil(arbre, cible) {
+  const fil = document.createElement("div");
+  fil.className = "fil";
+  const segs = cible.chemin.split("/");
+  segs.forEach((seg, i) => {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "sep"; sep.textContent = "/"; fil.appendChild(sep);
+    }
+    const prefixe = segs.slice(0, i + 1).join("/");
+    const dernier = i === segs.length - 1;
+    const el = document.createElement(dernier ? "span" : "a");
+    if (dernier) el.className = "courant"; else el.href = hashDe(prefixe);
+    if (i === 0) el.appendChild(elIcone("accueil"));
+    el.appendChild(document.createTextNode((i === 0 ? " " : "") + seg));
+    fil.appendChild(el);
+  });
+  return fil;
+}
+
+// ── Vue liste du dossier courant ────────────────────────────────────────────
+function rendreListe(arbre, cible) {
+  elExplorateur.innerHTML = "";
+  elExplorateur.appendChild(rendreFil(arbre, cible));
+  const enfants = tri(cible.enfants);
+  if (!enfants.length) {
+    const v = document.createElement("div"); v.className = "vide";
+    v.textContent = "Dossier vide.";
+    elExplorateur.appendChild(v);
+    return;
+  }
+  const liste = document.createElement("div"); liste.className = "liste";
+  enfants.forEach(e => liste.appendChild(ligne(e)));
+  elExplorateur.appendChild(liste);
+}
+
+// ── Rubriques (dossiers de 1er niveau) ──────────────────────────────────────
+function rendreRubriques(arbre, cible) {
+  elRubriques.innerHTML = "";
+  const segs = cible.chemin.split("/");
+  const actifTop = segs.length > 1 ? segs[1] : null;
+  const accueil = document.createElement("a");
+  accueil.className = "rubrique" + (actifTop === null ? " actif" : "");
+  accueil.href = hashDe(arbre.chemin);
+  accueil.appendChild(elIcone("accueil"));
+  accueil.appendChild(document.createTextNode(" Accueil"));
+  elRubriques.appendChild(accueil);
+  tri(arbre.enfants).filter(e => e.type === "dossier").forEach(d => {
+    const r = document.createElement("a");
+    r.className = "rubrique" + (d.nom === actifTop ? " actif" : "");
+    r.href = hashDe(d.chemin); r.title = d.nom;
+    r.appendChild(elIcone("dossier"));
+    r.appendChild(document.createTextNode(" " + d.nom));
+    elRubriques.appendChild(r);
+  });
+}
+
+// ── Recherche (tous les documents de la classe par nom) ─────────────────────
+function collecter(noeud, acc) {
+  (noeud.enfants || []).forEach(e => {
+    if (e.type === "dossier") collecter(e, acc); else acc.push(e);
+  });
+  return acc;
+}
+function rechercher(arbre, q) {
+  elExplorateur.innerHTML = "";
+  const fil = document.createElement("div"); fil.className = "fil";
+  fil.textContent = "Résultats pour « " + q + " »";
+  elExplorateur.appendChild(fil);
+  const trouves = collecter(arbre, []).filter(f => f.nom.toLowerCase().includes(q));
+  if (!trouves.length) {
+    const v = document.createElement("div"); v.className = "vide";
+    v.textContent = "Aucun document ne correspond.";
+    elExplorateur.appendChild(v);
+    return;
+  }
+  const liste = document.createElement("div"); liste.className = "liste";
+  trouves.sort((a, b) => a.nom.localeCompare(b.nom, "fr", {sensitivity:"base"}))
+         .forEach(f => liste.appendChild(ligne(f)));
+  elExplorateur.appendChild(liste);
+}
+
+// ── Routage : le hash de l'URL porte le dossier courant ─────────────────────
+async function naviguer() {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  const classe = hash.split("/")[0] || classesDispo[0];
+  if (!classe) return;
+  if (!arbres[classe]) {
+    const r = await fetch("/api/tree?classe=" + encodeURIComponent(classe));
+    if (r.ok) arbres[classe] = await r.json();
+  }
+  const arbre = arbres[classe];
+  if (!arbre) {                       // classe inconnue (lien périmé)
+    if (classesDispo.length) location.hash = encodeURIComponent(classesDispo[0]);
+    return;
+  }
+  if (elClasse.value !== classe) elClasse.value = classe;
+  elRecherche.value = "";
+  const cible = trouver(arbre, hash) || arbre;
+  rendreRubriques(arbre, cible);
+  rendreListe(arbre, cible);
+}
+
+async function init() {
+  const r = await fetch("/api/classes");
+  classesDispo = await r.json();
+  if (!classesDispo.length) {
+    elExplorateur.innerHTML =
+      "<div class='vide'>Aucun cours trouvé.<br>Lancez d'abord <code>cdp_scraper.py</code>.</div>";
+    return;
+  }
+  classesDispo.forEach(c => {
+    const o = document.createElement("option"); o.value = c; o.textContent = c; elClasse.appendChild(o);
+  });
+  elClasse.onchange = () => { location.hash = encodeURIComponent(elClasse.value); };
+  if (location.hash) naviguer();
+  else location.hash = encodeURIComponent(classesDispo[0]);
+}
+
+window.addEventListener("hashchange", naviguer);
+elRecherche.oninput = () => {
+  const q = elRecherche.value.trim().toLowerCase();
+  const arbre = arbres[elClasse.value];
+  if (!arbre) return;
+  if (q === "") naviguer(); else rechercher(arbre, q);
+};
+document.getElementById("theme").innerHTML = ICONES.theme;
+document.getElementById("theme").onclick = () => {
+  const sombre = document.documentElement.getAttribute("data-theme") === "dark";
+  document.documentElement.setAttribute("data-theme", sombre ? "light" : "dark");
+  localStorage.setItem("cdp-theme", sombre ? "light" : "dark");
+};
+if (localStorage.getItem("cdp-theme") === "dark")
+  document.documentElement.setAttribute("data-theme", "dark");
+
+init();
+</script>
+</body>
+</html>"""
+
+
+# Page d'ouverture d'un .ggb dans GeoGebra en ligne, avec repli en cascade : si
+# GeoGebra est injoignable (pas d'accès Internet), on tente l'application
+# installée sur le PC, et à défaut on révèle le fichier dans l'explorateur.
+# Confidentialité : deployggb.js vient de geogebra.org, mais le fichier .ggb est
+# lu depuis le serveur local (127.0.0.1) ; son contenu n'est pas envoyé à un tiers.
+PAGE_GGB = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITRE__</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff;overflow:hidden;
+    font:14px/1.5 system-ui,sans-serif;color:#1d1d1f}
+  #ggb{width:100%;height:100vh}
+  #msg{display:flex;align-items:center;justify-content:center;height:100vh;
+    text-align:center;padding:24px}
+</style>
+</head>
+<body>
+<div id="ggb"></div>
+<div id="msg" hidden></div>
+<script>
+const FICHIER = __FICHIER__;   // URL /file/... (même origine)
+const REVEAL  = __REVEAL__;    // URL /reveal/... (appli PC, sinon explorateur)
+const GGB_SRC = "https://www.geogebra.org/apps/deployggb.js";
+
+function montrer(t) {
+  document.getElementById("ggb").hidden = true;
+  const m = document.getElementById("msg");
+  m.textContent = t; m.hidden = false;
+}
+function repli() {
+  montrer("GeoGebra en ligne indisponible. Ouverture sur votre ordinateur…");
+  fetch(REVEAL).catch(() => {});
+}
+// « En ligne » = navigateur connecté ET service joignable (fetch no-cors :
+// résout si joignable, lève une erreur réseau sinon — sans souci de CORS).
+async function enLigne(url) {
+  if (!navigator.onLine) return false;
+  try { await fetch(url, {mode: "no-cors", cache: "no-store"}); return true; }
+  catch (e) { return false; }
+}
+function chargerScript(src) {
+  return new Promise((ok, ko) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = ok; s.onerror = ko;
+    document.head.appendChild(s);
+  });
+}
+
+(async () => {
+  if (!(await enLigne(GGB_SRC))) return repli();
+  try { await chargerScript(GGB_SRC); } catch (e) { return repli(); }
+  new GGBApplet({
+    appName: "classic", filename: FICHIER,
+    width: window.innerWidth, height: window.innerHeight,
+    showToolBar: true, showMenuBar: true, showAlgebraInput: true,
+    errorDialogsActive: true
+  }, true).inject("ggb");
+})();
+</script>
+</body>
+</html>"""
+
+
+# Page d'affichage d'un fichier de code (Python) colorisé. La coloration est
+# faite côté serveur avec le module standard `tokenize` (aucune dépendance,
+# fonctionne hors-ligne). __CORPS__ est déjà du HTML échappé + balises <span>.
+PAGE_CODE = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITRE__</title>
+<style>
+:root{ --bg:#fbfbfc; --txt:#1d1d1f; --panel:#fff; --border:#e3e3e6;
+  --kw:#a626a4; --str:#50a14f; --com:#a0a1a7; --num:#986801; --gut:#9a9aa2; }
+[data-theme="dark"]{ --bg:#16171a; --txt:#e7e7ea; --panel:#1f2024; --border:#2c2d33;
+  --kw:#c678dd; --str:#98c379; --com:#7f848e; --num:#d19a66; --gut:#6b6b70; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+  font:14px/1.6 ui-monospace,"Cascadia Code","Consolas",monospace}
+header{position:sticky;top:0;z-index:1;background:var(--panel);
+  border-bottom:1px solid var(--border);padding:8px 14px;
+  font:13px/1.4 system-ui,sans-serif;display:flex;align-items:center;gap:12px}
+header .titre{font-weight:600}
+header .grow{flex:1}
+button{font:inherit;color:var(--txt);background:var(--bg);cursor:pointer;
+  border:1px solid var(--border);border-radius:8px;padding:5px 12px}
+button:hover{border-color:var(--kw)}
+button:disabled{opacity:.6;cursor:default}
+#etat{color:var(--gut)}
+pre{margin:0;padding:14px 16px;overflow:auto;tab-size:4;-moz-tab-size:4}
+.code{display:grid;grid-template-columns:auto 1fr;column-gap:14px}
+.gut{color:var(--gut);text-align:right;user-select:none;white-space:pre}
+.ln{white-space:pre}
+.kw{color:var(--kw)} .str{color:var(--str)} .com{color:var(--com);font-style:italic}
+.num{color:var(--num)}
+</style>
+</head>
+<body>
+<header>
+  <span class="titre">__TITRE__</span>
+  <button id="lancer" title="Ouvrir le script dans un IDE installé, sinon le lancer dans un terminal">&#9654;&nbsp;Lancer sur la machine</button>
+  <span id="etat"></span>
+  <span class="grow"></span>
+</header>
+<pre><div class="code"><div class="gut">__GOUTTIERE__</div><div class="ln">__CORPS__</div></div></pre>
+<script>
+if (localStorage.getItem("cdp-theme") === "dark")
+  document.documentElement.setAttribute("data-theme", "dark");
+const LANCER = __LANCER__;
+const btn = document.getElementById("lancer");
+const etat = document.getElementById("etat");
+btn.onclick = async () => {
+  btn.disabled = true; etat.textContent = "Lancement…";
+  try {
+    const r = await fetch(LANCER);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.erreur || ("HTTP " + r.status));
+    etat.textContent = d.methode === "ide"
+      ? "Ouvert dans " + d.outil
+      : "Lancé dans un terminal";
+  } catch (e) {
+    etat.textContent = "Échec : " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>"""
+
+
+# Types de jetons colorisés comme chaîne (inclut les f-strings de Python 3.12+).
+_JETONS_STR = {tokenize.STRING}
+for _n in ("FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END"):
+    if hasattr(tokenize, _n):
+        _JETONS_STR.add(getattr(tokenize, _n))
+
+
+def colorier_python(source: str) -> str | None:
+    """Rend `source` (code Python) en HTML colorisé, en préservant exactement
+    l'indentation et les espaces. Renvoie None si le code n'est pas tokenisable
+    (l'appelant affiche alors le texte brut échappé)."""
+    try:
+        jetons = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return None
+    lignes = source.splitlines(keepends=True)
+
+    def ligne_at(r):
+        return lignes[r - 1] if 1 <= r <= len(lignes) else ""
+
+    def intervalle(r1, c1, r2, c2):
+        """Texte source brut entre deux positions (ligne, colonne)."""
+        if r2 > r1:
+            bouts = [ligne_at(r1)[c1:]]
+            bouts += [ligne_at(r) for r in range(r1 + 1, r2)]
+            bouts.append(ligne_at(r2)[:c2])
+            return "".join(bouts)
+        return ligne_at(r1)[c1:c2]
+
+    out = []
+    lr, lc = 1, 0
+    for typ, txt, (sr, sc), (er, ec), _ in jetons:
+        if typ == tokenize.ENCODING:
+            continue
+        if (sr, sc) > (lr, lc):                       # espaces entre deux jetons
+            out.append(html.escape(intervalle(lr, lc, sr, sc)))
+        cls = None
+        if typ == tokenize.COMMENT:
+            cls = "com"
+        elif typ in _JETONS_STR:
+            cls = "str"
+        elif typ == tokenize.NUMBER:
+            cls = "num"
+        elif typ == tokenize.NAME and keyword.iskeyword(txt):
+            cls = "kw"
+        # On émet la tranche réelle du source (et non `txt`) : garantit que le
+        # rendu, balises retirées, reproduit exactement le fichier d'origine
+        # même pour les jetons synthétiques (NEWLINE/DEDENT de fin de fichier).
+        esc = html.escape(intervalle(sr, sc, er, ec))
+        out.append(f'<span class="{cls}">{esc}</span>' if (cls and esc) else esc)
+        lr, lc = er, ec
+    return "".join(out)
+
+
+def resoudre_dans_racine(racine: Path, demande: str) -> Path | None:
+    """Résout `demande` (chemin relatif) sous `racine` et garantit qu'il y reste.
+
+    Renvoie le Path résolu si la cible est la racine ou un descendant, sinon
+    None (protection contre les `..` / chemins absolus / liens hors racine).
+    L'existence n'est PAS vérifiée ici (404 géré ailleurs).
+    """
+    racine = racine.resolve()
+    cible = (racine / demande).resolve()
+    if cible == racine or racine in cible.parents:
+        return cible
+    return None
+
+
+def lister_classes(racine: Path) -> list[str]:
+    """Noms des sous-dossiers de `racine` (= les classes scrapées), triés."""
+    if not racine.is_dir():
+        return []
+    return sorted(p.name for p in racine.iterdir() if p.is_dir())
+
+
+def _noeud(racine: Path, chemin_abs: Path) -> dict:
+    """Construit récursivement le nœud (dossier ou fichier) pour `chemin_abs`."""
+    rel = chemin_abs.relative_to(racine).as_posix()
+    if chemin_abs.is_dir():
+        enfants = [_noeud(racine, p) for p in chemin_abs.iterdir()]
+        # Dossiers d'abord, puis tri alphabétique insensible à la casse.
+        enfants.sort(key=lambda n: (n["type"] != "dossier", n["nom"].lower()))
+        return {"nom": chemin_abs.name, "type": "dossier", "chemin": rel, "enfants": enfants}
+    ext = chemin_abs.suffix.lstrip(".").lower()
+    return {
+        "nom": chemin_abs.name,
+        "type": "fichier",
+        "chemin": rel,
+        "taille": chemin_abs.stat().st_size,
+        "ext": ext,
+    }
+
+
+def construire_arbre(racine: Path, classe: str) -> dict | None:
+    """Arbre de la classe `classe` sous `racine`, ou None si elle n'existe pas.
+
+    Les `chemin` des nœuds sont relatifs à `racine` (ils incluent le dossier de
+    classe) et utilisables tels quels dans /file/<chemin>.
+    """
+    racine = racine.resolve()
+    base = resoudre_dans_racine(racine, classe)
+    if base is None or not base.is_dir():
+        return None
+    return _noeud(racine, base)
+
+
+# Extensions servies en text/plain pour s'afficher dans le navigateur plutôt
+# que de se télécharger (sinon le type MIME deviné déclencherait un download).
+EXT_TEXTE = {"txt", "md", "markdown", "csv", "tsv", "py", "tex", "json", "log",
+             "c", "cpp", "java", "ml", "sql", "r"}
+
+
+def reveler_dans_explorateur(cible: Path):
+    """Affiche `cible` dans l'explorateur de fichiers du système (sélectionné)."""
+    chemin = str(cible)
+    if sys.platform == "win32":
+        # explorer.exe exige les guillemets AUTOUR DU CHEMIN SEUL. En mode liste,
+        # subprocess quote tout l'argument « /select,<chemin> » (à cause des
+        # espaces/accents), et explorer abandonne en ouvrant le dossier Documents.
+        # On passe donc la ligne de commande en chaîne, avec le bon découpage.
+        subprocess.run(f'explorer /select,"{chemin}"')
+    elif sys.platform == "darwin":
+        subprocess.run(["open", "-R", chemin])
+    else:
+        subprocess.run(["xdg-open", str(cible.parent)])
+
+
+def _a_une_app_associee_windows(cible: Path) -> bool:
+    """True si l'extension de `cible` a une application associée sous Windows.
+
+    On interroge AssocQueryStringW (shlwapi) plutôt que de tenter os.startfile
+    « à l'aveugle » : sans application associée, os.startfile ouvre la fenêtre
+    « Comment voulez-vous ouvrir ce fichier ? » au lieu de lever une erreur, ce
+    qui empêcherait le repli sur l'explorateur.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    ext = cible.suffix
+    if not ext:
+        return False
+    ASSOCF_NONE = 0
+    ASSOCSTR_EXECUTABLE = 2
+    tampon = ctypes.create_unicode_buffer(1024)
+    taille = wintypes.DWORD(len(tampon))
+    res = ctypes.windll.shlwapi.AssocQueryStringW(
+        ASSOCF_NONE, ASSOCSTR_EXECUTABLE, ext, None, tampon, ctypes.byref(taille))
+    if res != 0 or not tampon.value:
+        return False
+    # Une extension SANS application résout vers OpenWith.exe (le sélecteur
+    # « Comment voulez-vous ouvrir ce fichier ? ») : on le traite comme « pas
+    # d'app » pour basculer sur la révélation dans l'explorateur.
+    return os.path.basename(tampon.value).lower() != "openwith.exe"
+
+
+def ouvrir_ou_reveler(cible: Path):
+    """Ouvre `cible` avec son application associée si elle est installée,
+    sinon la révèle (sélectionnée) dans l'explorateur de fichiers.
+
+    L'utilisateur retrouve ainsi le fichier dans l'explorateur pour décider quoi
+    en faire (plutôt qu'un téléchargement silencieux par le navigateur, ou la
+    fenêtre Windows « Comment ouvrir ce fichier ? »).
+    """
+    if sys.platform == "win32":
+        if _a_une_app_associee_windows(cible):
+            try:
+                os.startfile(str(cible))  # lance l'app associée (Word…)
+                return
+            except OSError:
+                pass
+        reveler_dans_explorateur(cible)
+        return
+    if sys.platform == "darwin":
+        # open échoue (code != 0) s'il n'y a pas d'app associée → on révèle.
+        if subprocess.run(["open", str(cible)]).returncode == 0:
+            return
+    else:
+        if subprocess.run(["xdg-open", str(cible)]).returncode == 0:
+            return
+    reveler_dans_explorateur(cible)
+
+
+# Lanceurs d'IDE en ligne de commande, par ordre de préférence. Le premier
+# présent dans le PATH ouvre le script. shutil.which gère .exe/.cmd/.bat (via
+# PATHEXT sous Windows) ; la plupart des IDE installent un tel lanceur (`code`
+# pour VS Code, `subl` pour Sublime, `charm`/`pycharm` pour PyCharm…).
+_IDE_LANCEURS = [
+    ("code", "Visual Studio Code"),
+    ("code-insiders", "Visual Studio Code Insiders"),
+    ("subl", "Sublime Text"),
+    ("charm", "PyCharm"),
+    ("pycharm64", "PyCharm"),
+    ("pycharm", "PyCharm"),
+    ("thonny", "Thonny"),
+    ("spyder", "Spyder"),
+    ("gvim", "Vim"),
+]
+
+
+def _python_console() -> str:
+    """Chemin de l'interpréteur Python à utiliser dans un terminal.
+
+    Préfère python.exe à pythonw.exe (ce dernier n'affiche aucune console, donc
+    aucune sortie du script ne serait visible)."""
+    exe = sys.executable or "python"
+    if exe.lower().endswith("pythonw.exe"):
+        candidat = exe[: -len("pythonw.exe")] + "python.exe"
+        if os.path.exists(candidat):
+            exe = candidat
+    return exe
+
+
+def trouver_ide() -> tuple[str, str] | None:
+    """(chemin, nom) du premier IDE trouvé dans le PATH, ou None si aucun."""
+    for commande, nom in _IDE_LANCEURS:
+        chemin = shutil.which(commande)
+        if chemin:
+            return chemin, nom
+    return None
+
+
+def _ouvrir_dans_ide(chemin_ide: str, cible: Path):
+    try:
+        subprocess.Popen([chemin_ide, str(cible)])
+    except OSError:
+        # Lanceur .cmd/.bat (ex. code.cmd) : non exécutable directement par
+        # CreateProcess sous Windows → on repasse par le shell.
+        subprocess.Popen(f'"{chemin_ide}" "{cible}"', shell=True)
+
+
+def _ouvrir_terminal_python(cible: Path):
+    """Ouvre un terminal et y lance le script (fenêtre conservée ouverte)."""
+    exe = _python_console()
+    if sys.platform == "win32":
+        # Motif « cmd /k ""prog" "arg"" » : cmd retire la paire de guillemets
+        # extérieure et lance la commande ; /k garde la fenêtre ouverte pour
+        # voir la sortie. cwd = dossier du script → nom de fichier seul.
+        cmdline = f'cmd /k ""{exe}" "{cible.name}""'
+        subprocess.Popen(cmdline, cwd=str(cible.parent),
+                         creationflags=subprocess.CREATE_NEW_CONSOLE)
+    elif sys.platform == "darwin":
+        commande = f"cd {shlex.quote(str(cible.parent))} && {shlex.quote(exe)} {shlex.quote(cible.name)}"
+        subprocess.Popen(["osascript", "-e",
+                          f'tell application "Terminal" to do script {json.dumps(commande)}'])
+    else:
+        commande = f"{shlex.quote(exe)} {shlex.quote(str(cible))}; exec ${{SHELL:-sh}}"
+        for term in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
+            if shutil.which(term):
+                subprocess.Popen([term, "-e", "sh", "-c", commande])
+                return
+        raise RuntimeError("Aucun terminal trouvé")
+
+
+def lancer_python(cible: Path) -> dict:
+    """Lance le script `cible` sur la machine. Tente d'abord de l'ouvrir dans un
+    IDE installé ; à défaut, l'exécute dans un terminal. Renvoie un descriptif
+    du moyen utilisé, pour le retour affiché à l'utilisateur."""
+    ide = trouver_ide()
+    if ide is not None:
+        chemin_ide, nom = ide
+        _ouvrir_dans_ide(chemin_ide, cible)
+        return {"methode": "ide", "outil": nom}
+    _ouvrir_terminal_python(cible)
+    return {"methode": "terminal", "outil": "terminal"}
+
+
+class GestionnaireCDP(BaseHTTPRequestHandler):
+    """Sert la page, l'API JSON et les fichiers. `self.server.racine` = racine."""
+
+    def _envoyer_octets(self, code: int, octets: bytes, content_type: str,
+                        cache: bool = True):
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(octets)))
+        if not cache:
+            # Évite qu'un navigateur garde une ancienne version de la page/API
+            # après une mise à jour du viewer (cause de comportements « périmés »).
+            self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(octets)
+
+    def _envoyer_json(self, code: int, donnees):
+        self._envoyer_octets(code, json.dumps(donnees).encode("utf-8"),
+                             "application/json; charset=utf-8", cache=False)
+
+    def _erreur(self, code: int, message: str):
+        self._envoyer_octets(code, message.encode("utf-8"), "text/plain; charset=utf-8")
+
+    def do_GET(self):
+        parties = urllib.parse.urlparse(self.path)
+        chemin = parties.path
+        racine = self.server.racine
+
+        if chemin == "/":
+            self._envoyer_octets(200, PAGE_HTML.encode("utf-8"),
+                                 "text/html; charset=utf-8", cache=False)
+            return
+
+        if chemin == "/api/classes":
+            self._envoyer_json(200, lister_classes(racine))
+            return
+
+        if chemin == "/api/tree":
+            params = urllib.parse.parse_qs(parties.query)
+            classe = (params.get("classe") or [""])[0]
+            arbre = construire_arbre(racine, classe)
+            if arbre is None:
+                self._erreur(404, "Classe introuvable")
+                return
+            self._envoyer_json(200, arbre)
+            return
+
+        if chemin.startswith("/ouvrir/"):                 # .ggb -> GeoGebra en ligne
+            rel = urllib.parse.unquote(chemin[len("/ouvrir/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.is_file():
+                self._erreur(404, "Fichier introuvable")
+                return
+            enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
+            page = (PAGE_GGB
+                    .replace("__TITRE__", html.escape(cible.name))
+                    .replace("__FICHIER__", json.dumps("/file/" + enc))
+                    .replace("__REVEAL__", json.dumps("/reveal/" + enc)))
+            self._envoyer_octets(200, page.encode("utf-8"),
+                                 "text/html; charset=utf-8", cache=False)
+            return
+
+        if chemin.startswith("/code/"):                   # .py -> code colorise
+            rel = urllib.parse.unquote(chemin[len("/code/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.is_file():
+                self._erreur(404, "Fichier introuvable")
+                return
+            source = cible.read_text(encoding="utf-8", errors="replace")
+            corps = colorier_python(source)
+            if corps is None:                             # non tokenisable : texte brut
+                corps = html.escape(source)
+            n = max(1, len(source.splitlines()))
+            gouttiere = "\n".join(str(i) for i in range(1, n + 1))
+            enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
+            page = (PAGE_CODE
+                    .replace("__TITRE__", html.escape(cible.name))
+                    .replace("__GOUTTIERE__", gouttiere)
+                    .replace("__CORPS__", corps)
+                    .replace("__LANCER__", json.dumps("/lancer/" + enc)))
+            self._envoyer_octets(200, page.encode("utf-8"),
+                                 "text/html; charset=utf-8", cache=False)
+            return
+
+        if chemin.startswith("/lancer/"):                 # .py -> exécuté sur la machine
+            rel = urllib.parse.unquote(chemin[len("/lancer/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.is_file():
+                self._erreur(404, "Fichier introuvable")
+                return
+            try:
+                info = lancer_python(cible)
+            except Exception as e:
+                self._envoyer_json(500, {"erreur": str(e)})
+                return
+            self._envoyer_json(200, info)
+            return
+
+        if chemin.startswith("/file/"):
+            rel = urllib.parse.unquote(chemin[len("/file/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.is_file():
+                self._erreur(404, "Fichier introuvable")
+                return
+            ext = cible.suffix.lstrip(".").lower()
+            if ext in EXT_TEXTE:
+                ctype = "text/plain; charset=utf-8"
+            else:
+                ctype = mimetypes.guess_type(cible.name)[0] or "application/octet-stream"
+            self._envoyer_octets(200, cible.read_bytes(), ctype)
+            return
+
+        if chemin.startswith("/reveal/"):
+            rel = urllib.parse.unquote(chemin[len("/reveal/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.exists():
+                self._erreur(404, "Fichier introuvable")
+                return
+            try:
+                ouvrir_ou_reveler(cible)
+            except Exception:
+                pass
+            self.send_response(204)
+            self.end_headers()
+            return
+
+        self._erreur(404, "Introuvable")
+
+    def log_message(self, *args):  # silence: pas de log par requête
+        pass
+
+
+class ServeurCDP(socketserver.TCPServer):
+    allow_reuse_address = True
+
+    def __init__(self, adresse, handler, racine: Path):
+        self.racine = racine.resolve()
+        super().__init__(adresse, handler)
+
+
+def creer_serveur(racine: Path, port: int) -> ServeurCDP:
+    """Crée (sans démarrer) le serveur lié à 127.0.0.1 sur `port` (0 = éphémère)."""
+    return ServeurCDP(("127.0.0.1", port), GestionnaireCDP, Path(racine))
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Visualiseur web local des cours téléchargés par cdp_scraper.")
+    p.add_argument("--dossier", default="cours_cdp", metavar="CHEMIN",
+                   help="Dossier racine des cours (défaut : cours_cdp)")
+    p.add_argument("--port", type=int, default=8000,
+                   help="Port d'écoute (défaut : 8000)")
+    p.add_argument("--no-browser", action="store_true",
+                   help="Ne pas ouvrir le navigateur automatiquement")
+    args = p.parse_args()
+
+    racine = Path(args.dossier)
+    if not racine.is_dir():
+        print(f"Dossier introuvable : {racine.resolve()}")
+        print("Lancez d'abord cdp_scraper.py, ou indiquez --dossier <chemin>.")
+
+    serveur = creer_serveur(racine, args.port)
+    url = f"http://127.0.0.1:{serveur.server_address[1]}"
+    print(f"cdp-viewer en écoute sur {url}  (Ctrl+C pour arrêter)")
+    if not args.no_browser:
+        webbrowser.open(url)
+    try:
+        serveur.serve_forever()
+    except KeyboardInterrupt:
+        print("\nArrêt.")
+    finally:
+        serveur.shutdown()
+        serveur.server_close()
+
+
+if __name__ == "__main__":
+    main()
