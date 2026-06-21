@@ -1,4 +1,11 @@
 import unittest
+import sys
+from pathlib import Path
+
+# Les tests vivent dans tests/ ; on ajoute la racine du projet au sys.path pour
+# pouvoir importer cdp_scraper quel que soit le dossier depuis lequel on lance
+# la suite.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cdp_scraper
 

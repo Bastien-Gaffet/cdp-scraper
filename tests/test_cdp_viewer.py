@@ -1,11 +1,17 @@
 import unittest
 from pathlib import Path
+import sys
 import tempfile
 import json
 import threading
 import urllib.request
 import urllib.error
 from unittest import mock
+
+# Les tests vivent dans tests/ ; on ajoute la racine du projet au sys.path pour
+# pouvoir importer les modules (cdp_viewer, cdp_scraper) quel que soit le dossier
+# depuis lequel on lance la suite.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cdp_viewer
 
