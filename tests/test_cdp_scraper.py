@@ -18,7 +18,7 @@ def _lire_fixture(nom: str) -> str:
 
 
 class _FakeResp:
-    """Réponse minimale : seul `.text` est utilisé par crawler_progcolles."""
+    """Réponse minimale : `.text` pour crawler_progcolles ; `.headers` est ajouté ponctuellement pour nom_fichier."""
 
     def __init__(self, text: str):
         self.text = text
@@ -31,7 +31,9 @@ class _FakeSession:
         self.pages = pages
 
     def get(self, url, timeout=None):
-        return _FakeResp(self.pages.get(url, ""))
+        if url not in self.pages:
+            raise KeyError(f"URL inattendue dans _FakeSession : {url!r}")
+        return _FakeResp(self.pages[url])
 
 
 class TestVersion(unittest.TestCase):
