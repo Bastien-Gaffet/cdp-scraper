@@ -8,6 +8,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cdp_scraper
+import cdp_viewer
+
+
+class TestVersion(unittest.TestCase):
+    """Le versioning est unifié : scraper et viewer partagent la même version."""
+
+    def test_versions_egales(self):
+        self.assertEqual(cdp_scraper.__version__, cdp_viewer.__version__)
+
+    def test_version_attendue(self):
+        self.assertEqual(cdp_scraper.__version__, "1.1.0")
 
 
 class TestAnalyserPage(unittest.TestCase):

@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import tempfile
 import json
+import subprocess
 import threading
 import urllib.request
 import urllib.error
@@ -291,6 +292,20 @@ class TestServeur(unittest.TestCase):
         self.assertIn("id=\"rubriques\"", html)
         self.assertIn("id=\"explorateur\"", html)
         self.assertIn("/api/classes", html)
+
+
+class TestVersionCLI(unittest.TestCase):
+    """`cdp_viewer.py --version` affiche la version et quitte proprement."""
+
+    def test_version_cli(self):
+        racine_projet = Path(__file__).resolve().parent.parent
+        script = racine_projet / "cdp_viewer.py"
+        res = subprocess.run(
+            [sys.executable, str(script), "--version"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("cdp-viewer 1.1.0", res.stdout)
 
 
 if __name__ == "__main__":

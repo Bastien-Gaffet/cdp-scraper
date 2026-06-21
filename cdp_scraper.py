@@ -33,7 +33,7 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import urljoin, urlsplit, unquote
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
 
