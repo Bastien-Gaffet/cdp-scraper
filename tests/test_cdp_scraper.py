@@ -81,6 +81,65 @@ class TestAnalyserPage(unittest.TestCase):
         self.assertEqual(reps[0]["nom"], "Chapitre 2")
         self.assertTrue(reps[0]["url"].endswith("/maclasse/docs?rep=7"))
 
+    def test_documents_recents_ignore(self):
+        # Le bloc « Documents récents » liste des docs dont le nom contient le
+        # chemin (« Matière/… ») : ils doivent être ignorés (récupérés ailleurs).
+        page = (
+            '<section>'
+            '<p class="doc"><span class="docdonnees">(pdf, 1 jan, 100 ko)</span> '
+            '<a href="download?id=99&amp;v=zzz">'
+            '<span class="icone"></span><span class="nom">Physique/TD/TD1</span></a></p>'
+            '</section>'
+        )
+        _, docs = cdp_scraper.analyser_page(page, self.URL)
+        self.assertEqual(docs, [])
+
+    def test_melange_dossiers_et_documents(self):
+        page = (
+            '<section>'
+            '<p class="rep"><a href="?rep=5">'
+            '<span class="nom">Cours</span></a></p>'
+            '<p class="doc"><span class="docdonnees">(pdf, 1 jan, 100 ko)</span> '
+            '<a href="download?id=7&amp;v=aaa">'
+            '<span class="icone"></span><span class="nom">Intro</span></a></p>'
+            '</section>'
+        )
+        reps, docs = cdp_scraper.analyser_page(page, self.URL)
+        self.assertEqual(len(reps), 1)
+        self.assertEqual(reps[0]["nom"], "Cours")
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0]["nom"], "Intro")
+
+    def test_doc_sans_docdonnees(self):
+        # Sans bloc docdonnees : type vide, mais URL toujours en &dl.
+        page = (
+            '<section>'
+            '<p class="doc">'
+            '<a href="download?id=8&amp;v=bbb">'
+            '<span class="icone"></span><span class="nom">Sans type</span></a></p>'
+            '</section>'
+        )
+        _, docs = cdp_scraper.analyser_page(page, self.URL)
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0]["type"], "")
+        self.assertEqual(
+            docs[0]["url"],
+            "https://cahier-de-prepa.fr/maclasse/download?id=8&dl",
+        )
+
+    def test_entites_html_dans_nom(self):
+        # &amp; et accents encodés doivent être déséchappés dans le nom.
+        page = (
+            '<section>'
+            '<p class="doc"><span class="docdonnees">(pdf, 1 jan, 100 ko)</span> '
+            '<a href="download?id=9&amp;v=ccc">'
+            '<span class="icone"></span>'
+            '<span class="nom">Alg&egrave;bre &amp; G&eacute;om&eacute;trie</span></a></p>'
+            '</section>'
+        )
+        _, docs = cdp_scraper.analyser_page(page, self.URL)
+        self.assertEqual(docs[0]["nom"], "Algèbre & Géométrie")
+
 
 if __name__ == "__main__":
     unittest.main()
