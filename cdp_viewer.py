@@ -11,6 +11,8 @@ import json
 import keyword
 import mimetypes
 import os
+import shlex
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -416,8 +418,16 @@ PAGE_CODE = r"""<!doctype html>
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--txt);
   font:14px/1.6 ui-monospace,"Cascadia Code","Consolas",monospace}
-header{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--border);
-  padding:8px 14px;font:13px/1.4 system-ui,sans-serif}
+header{position:sticky;top:0;z-index:1;background:var(--panel);
+  border-bottom:1px solid var(--border);padding:8px 14px;
+  font:13px/1.4 system-ui,sans-serif;display:flex;align-items:center;gap:12px}
+header .titre{font-weight:600}
+header .grow{flex:1}
+button{font:inherit;color:var(--txt);background:var(--bg);cursor:pointer;
+  border:1px solid var(--border);border-radius:8px;padding:5px 12px}
+button:hover{border-color:var(--kw)}
+button:disabled{opacity:.6;cursor:default}
+#etat{color:var(--gut)}
 pre{margin:0;padding:14px 16px;overflow:auto;tab-size:4;-moz-tab-size:4}
 .code{display:grid;grid-template-columns:auto 1fr;column-gap:14px}
 .gut{color:var(--gut);text-align:right;user-select:none;white-space:pre}
@@ -427,11 +437,34 @@ pre{margin:0;padding:14px 16px;overflow:auto;tab-size:4;-moz-tab-size:4}
 </style>
 </head>
 <body>
-<header>__TITRE__</header>
+<header>
+  <span class="titre">__TITRE__</span>
+  <button id="lancer" title="Ouvrir le script dans un IDE installé, sinon le lancer dans un terminal">&#9654;&nbsp;Lancer sur la machine</button>
+  <span id="etat"></span>
+  <span class="grow"></span>
+</header>
 <pre><div class="code"><div class="gut">__GOUTTIERE__</div><div class="ln">__CORPS__</div></div></pre>
 <script>
 if (localStorage.getItem("cdp-theme") === "dark")
   document.documentElement.setAttribute("data-theme", "dark");
+const LANCER = __LANCER__;
+const btn = document.getElementById("lancer");
+const etat = document.getElementById("etat");
+btn.onclick = async () => {
+  btn.disabled = true; etat.textContent = "Lancement…";
+  try {
+    const r = await fetch(LANCER);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.erreur || ("HTTP " + r.status));
+    etat.textContent = d.methode === "ide"
+      ? "Ouvert dans " + d.outil
+      : "Lancé dans un terminal";
+  } catch (e) {
+    etat.textContent = "Échec : " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
 </script>
 </body>
 </html>"""
@@ -619,6 +652,90 @@ def ouvrir_ou_reveler(cible: Path):
     reveler_dans_explorateur(cible)
 
 
+# Lanceurs d'IDE en ligne de commande, par ordre de préférence. Le premier
+# présent dans le PATH ouvre le script. shutil.which gère .exe/.cmd/.bat (via
+# PATHEXT sous Windows) ; la plupart des IDE installent un tel lanceur (`code`
+# pour VS Code, `subl` pour Sublime, `charm`/`pycharm` pour PyCharm…).
+_IDE_LANCEURS = [
+    ("code", "Visual Studio Code"),
+    ("code-insiders", "Visual Studio Code Insiders"),
+    ("subl", "Sublime Text"),
+    ("charm", "PyCharm"),
+    ("pycharm64", "PyCharm"),
+    ("pycharm", "PyCharm"),
+    ("thonny", "Thonny"),
+    ("spyder", "Spyder"),
+    ("gvim", "Vim"),
+]
+
+
+def _python_console() -> str:
+    """Chemin de l'interpréteur Python à utiliser dans un terminal.
+
+    Préfère python.exe à pythonw.exe (ce dernier n'affiche aucune console, donc
+    aucune sortie du script ne serait visible)."""
+    exe = sys.executable or "python"
+    if exe.lower().endswith("pythonw.exe"):
+        candidat = exe[: -len("pythonw.exe")] + "python.exe"
+        if os.path.exists(candidat):
+            exe = candidat
+    return exe
+
+
+def trouver_ide() -> tuple[str, str] | None:
+    """(chemin, nom) du premier IDE trouvé dans le PATH, ou None si aucun."""
+    for commande, nom in _IDE_LANCEURS:
+        chemin = shutil.which(commande)
+        if chemin:
+            return chemin, nom
+    return None
+
+
+def _ouvrir_dans_ide(chemin_ide: str, cible: Path):
+    try:
+        subprocess.Popen([chemin_ide, str(cible)])
+    except OSError:
+        # Lanceur .cmd/.bat (ex. code.cmd) : non exécutable directement par
+        # CreateProcess sous Windows → on repasse par le shell.
+        subprocess.Popen(f'"{chemin_ide}" "{cible}"', shell=True)
+
+
+def _ouvrir_terminal_python(cible: Path):
+    """Ouvre un terminal et y lance le script (fenêtre conservée ouverte)."""
+    exe = _python_console()
+    if sys.platform == "win32":
+        # Motif « cmd /k ""prog" "arg"" » : cmd retire la paire de guillemets
+        # extérieure et lance la commande ; /k garde la fenêtre ouverte pour
+        # voir la sortie. cwd = dossier du script → nom de fichier seul.
+        cmdline = f'cmd /k ""{exe}" "{cible.name}""'
+        subprocess.Popen(cmdline, cwd=str(cible.parent),
+                         creationflags=subprocess.CREATE_NEW_CONSOLE)
+    elif sys.platform == "darwin":
+        commande = f"cd {shlex.quote(str(cible.parent))} && {shlex.quote(exe)} {shlex.quote(cible.name)}"
+        subprocess.Popen(["osascript", "-e",
+                          f'tell application "Terminal" to do script {json.dumps(commande)}'])
+    else:
+        commande = f"{shlex.quote(exe)} {shlex.quote(str(cible))}; exec ${{SHELL:-sh}}"
+        for term in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
+            if shutil.which(term):
+                subprocess.Popen([term, "-e", "sh", "-c", commande])
+                return
+        raise RuntimeError("Aucun terminal trouvé")
+
+
+def lancer_python(cible: Path) -> dict:
+    """Lance le script `cible` sur la machine. Tente d'abord de l'ouvrir dans un
+    IDE installé ; à défaut, l'exécute dans un terminal. Renvoie un descriptif
+    du moyen utilisé, pour le retour affiché à l'utilisateur."""
+    ide = trouver_ide()
+    if ide is not None:
+        chemin_ide, nom = ide
+        _ouvrir_dans_ide(chemin_ide, cible)
+        return {"methode": "ide", "outil": nom}
+    _ouvrir_terminal_python(cible)
+    return {"methode": "terminal", "outil": "terminal"}
+
+
 class GestionnaireCDP(BaseHTTPRequestHandler):
     """Sert la page, l'API JSON et les fichiers. `self.server.racine` = racine."""
 
@@ -698,12 +815,31 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
                 corps = html.escape(source)
             n = max(1, len(source.splitlines()))
             gouttiere = "\n".join(str(i) for i in range(1, n + 1))
+            enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
             page = (PAGE_CODE
                     .replace("__TITRE__", html.escape(cible.name))
                     .replace("__GOUTTIERE__", gouttiere)
-                    .replace("__CORPS__", corps))
+                    .replace("__CORPS__", corps)
+                    .replace("__LANCER__", json.dumps("/lancer/" + enc)))
             self._envoyer_octets(200, page.encode("utf-8"),
                                  "text/html; charset=utf-8", cache=False)
+            return
+
+        if chemin.startswith("/lancer/"):                 # .py -> exécuté sur la machine
+            rel = urllib.parse.unquote(chemin[len("/lancer/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "Acces refuse")
+                return
+            if not cible.is_file():
+                self._erreur(404, "Fichier introuvable")
+                return
+            try:
+                info = lancer_python(cible)
+            except Exception as e:
+                self._envoyer_json(500, {"erreur": str(e)})
+                return
+            self._envoyer_json(200, info)
             return
 
         if chemin.startswith("/file/"):

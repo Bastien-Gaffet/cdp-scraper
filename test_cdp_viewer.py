@@ -107,6 +107,37 @@ class TestOuvrirOuReveler(unittest.TestCase):
         rev.assert_called_once()
 
 
+class TestLancerPython(unittest.TestCase):
+    def test_ouvre_dans_ide_si_disponible(self):
+        with mock.patch.object(cdp_viewer, "trouver_ide",
+                               return_value=("C:/x/code.exe", "Visual Studio Code")), \
+             mock.patch.object(cdp_viewer, "_ouvrir_dans_ide") as ide, \
+             mock.patch.object(cdp_viewer, "_ouvrir_terminal_python") as term:
+            info = cdp_viewer.lancer_python(Path("C:/x/s.py"))
+        self.assertEqual(info, {"methode": "ide", "outil": "Visual Studio Code"})
+        ide.assert_called_once()
+        term.assert_not_called()
+
+    def test_repli_terminal_sans_ide(self):
+        with mock.patch.object(cdp_viewer, "trouver_ide", return_value=None), \
+             mock.patch.object(cdp_viewer, "_ouvrir_dans_ide") as ide, \
+             mock.patch.object(cdp_viewer, "_ouvrir_terminal_python") as term:
+            info = cdp_viewer.lancer_python(Path("C:/x/s.py"))
+        self.assertEqual(info["methode"], "terminal")
+        term.assert_called_once()
+        ide.assert_not_called()
+
+    def test_trouver_ide_renvoie_premier_present(self):
+        def faux_which(cmd):
+            return "C:/x/subl.exe" if cmd == "subl" else None
+        with mock.patch.object(cdp_viewer.shutil, "which", side_effect=faux_which):
+            self.assertEqual(cdp_viewer.trouver_ide(), ("C:/x/subl.exe", "Sublime Text"))
+
+    def test_trouver_ide_aucun(self):
+        with mock.patch.object(cdp_viewer.shutil, "which", return_value=None):
+            self.assertIsNone(cdp_viewer.trouver_ide())
+
+
 class TestServeur(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -205,6 +236,32 @@ class TestServeur(unittest.TestCase):
         self.assertIn('class="kw"', html)
         self.assertIn('class="str"', html)
         self.assertIn("script.py", html)
+        # Bouton de lancement + URL /lancer/ pointant vers le script.
+        self.assertIn('id="lancer"', html)
+        self.assertIn("/lancer/PCSI/Maths/script.py", html)
+
+    def test_lancer_appelle_lancer_python(self):
+        with mock.patch.object(cdp_viewer, "lancer_python",
+                               return_value={"methode": "ide", "outil": "Test"}) as m:
+            with self._get("/lancer/PCSI/Maths/script.py") as r:
+                self.assertEqual(r.status, 200)
+                self.assertEqual(json.load(r), {"methode": "ide", "outil": "Test"})
+        self.assertEqual(m.call_count, 1)
+        self.assertEqual(Path(m.call_args[0][0]).name, "script.py")
+
+    def test_lancer_traversal_403(self):
+        with mock.patch.object(cdp_viewer, "lancer_python") as m:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._get("/lancer/../secret.txt")
+        self.assertEqual(ctx.exception.code, 403)
+        m.assert_not_called()
+
+    def test_lancer_inexistant_404(self):
+        with mock.patch.object(cdp_viewer, "lancer_python") as m:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._get("/lancer/PCSI/Maths/absent.py")
+        self.assertEqual(ctx.exception.code, 404)
+        m.assert_not_called()
 
     def test_ouvrir_traversal_403(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:

@@ -122,7 +122,9 @@ naviguez dans l'arbre à gauche, l'aperçu s'affiche à droite.
 - Les fichiers **Python** (`.py`) s'affichent dans le navigateur avec
   **coloration syntaxique** et indentation préservée (coloration faite côté
   serveur avec le module standard `tokenize` : aucune dépendance, fonctionne
-  hors-ligne).
+  hors-ligne). Un bouton **« Lancer sur la machine »** ouvre le script dans un
+  IDE installé (VS Code, PyCharm, Sublime, Thonny, Spyder…) ou, à défaut,
+  l'exécute dans un terminal.
 - Les fichiers **GeoGebra** (`.ggb`) s'ouvrent dans un nouvel onglet via
   **GeoGebra en ligne** ; en l'absence d'Internet, repli sur l'**application
   installée** sur le PC, puis à défaut sur l'**explorateur de fichiers**.
