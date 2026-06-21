@@ -36,9 +36,6 @@ python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --login moi@ex.
 
 # Mode simulation (voir ce qui serait téléchargé)
 python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --simulation
-
-# Exporter la liste des URLs (pour telechargeur_batch.py) + cookies
-python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --liste urls.txt --cookie-sortie cookies.txt
 ```
 
 > Les arguments fournis sautent la question correspondante. Tout argument manquant (sauf en mode pleinement scripté) est demandé au clavier.
@@ -53,12 +50,10 @@ python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --liste urls.tx
 | `--login NOM` | string | *(demandé)* | Identifiant / email de connexion |
 | `--mdp MDP` | string | *(demandé, masqué)* | Mot de passe |
 | `-s / --sortie DIR` | string | `cours_cdp` | Dossier de destination |
-| `--liste FICHIER` | string | — | Exporter les URLs trouvées (compatible `telechargeur_batch.py`) |
 | `--simulation` | flag | non | Lister les documents sans télécharger |
 | `--profondeur N` | int | illimité | Profondeur maximale de sous-dossiers explorés |
 | `--delai SECONDES` | float | 0 | Pause entre requêtes pour ménager le serveur |
 | `--sans-colles` | flag | non | Ne pas récupérer les programmes de colles |
-| `--cookie-sortie FICHIER` | string | — | Sauvegarder les cookies de session |
 | `--accepter-conditions` | flag | non | Accepter les conditions d'usage sans invite (1er lancement) |
 | `--version` | flag | — | Afficher la version et quitter |
 
@@ -128,18 +123,6 @@ Le script récupère aussi les programmes de colles (`progcolles?matiere`), qui 
 
 Ces programmes contiennent souvent des PDF qui ne sont **pas** dans l'arborescence des documents classiques. Désactivable avec `--sans-colles`.
 
-## 🔗 Compatibilité avec telechargeur_batch.py
-
-Le flag `--liste` génère un fichier d'URLs (avec le chemin de chaque document en commentaire). Couplé à `--cookie-sortie`, il permet de séparer découverte et téléchargement :
-
-```bash
-# Étape 1 : découvrir, exporter les URLs + cookies
-python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --liste urls.txt --cookie-sortie cookies.txt
-
-# Étape 2 : télécharger en parallèle (4 threads)
-python telechargeur_batch.py urls.txt --cookie-fichier cookies.txt -t 4 -s ./cours
-```
-
 ---
 
 ## 📋 Mode simulation
@@ -169,6 +152,4 @@ Les couleurs du terminal sont gérées par des codes ANSI bruts (activation du m
 ## 💡 Conseils d'utilisation
 
 - **Premier lancement** : `--simulation` pour vérifier ce qui est trouvé avant de télécharger
-- **Gros volume** : `--liste` puis `telechargeur_batch.py --threads 4`
-- **Usage régulier** : `--cookie-sortie` pour relancer sans re-saisir les identifiants
 - **Affichage des accents** : la sortie console est forcée en UTF-8 ; les noms de fichiers sont de toute façon écrits correctement sur le disque
