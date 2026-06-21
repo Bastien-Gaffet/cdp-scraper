@@ -49,7 +49,7 @@ Au **premier lancement**, ces conditions s'affichent et vous devez les accepter
 
 ## 🚀 Installation
 
-Python ≥ 3.8 requis (seule dépendance : `requests`).
+Python ≥ 3.10 requis (seule dépendance : `requests`).
 
 ### Pour utiliser l'outil — le plus simple
 

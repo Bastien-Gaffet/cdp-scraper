@@ -33,9 +33,8 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import urljoin, urlsplit, unquote
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
-# Remplacez par l'URL réelle après publication.
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
 
 # Fichier marquant que l'utilisateur a accepté les conditions d'usage.
@@ -184,15 +183,6 @@ def connexion(session: requests.Session, base: str, login: str, mdp: str):
         return True, data.get("message", "Connexion réussie")
     return False, data.get("message", "Identifiants refusés")
 
-
-def sauvegarder_cookies(session: requests.Session, chemin: Path):
-    """Écrit les cookies (CDP_SESSION…) au format attendu par telechargeur_batch.py."""
-    with open(chemin, "w", encoding="utf-8") as f:
-        f.write("# Cookies de session cahier-de-prepa\n")
-        f.write(f"# Utilisable avec : python telechargeur_batch.py urls.txt --cookie-fichier {chemin}\n\n")
-        for c in session.cookies:
-            f.write(f"{c.name}={c.value}\n")
-    print(vert(f"Cookies sauvegardés : {chemin}"))
 
 # ─── Analyse des pages « docs » ──────────────────────────────────────────────
 
@@ -579,7 +569,6 @@ Exemples :
   python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe
   python cdp_scraper.py --url https://... --login moi@ex.fr --mdp secret -s ./cours
   python cdp_scraper.py --url https://... --simulation
-  python cdp_scraper.py --url https://... --liste urls.txt --cookie-sortie cookies.txt
 """,
     )
     p.add_argument("--url", metavar="URL_CLASSE",
@@ -590,8 +579,6 @@ Exemples :
                    help="Mot de passe (demandé de façon masquée si absent)")
     p.add_argument("-s", "--sortie", metavar="DOSSIER",
                    help="Dossier de destination (défaut : cours_cdp)")
-    p.add_argument("--liste", metavar="FICHIER",
-                   help="Exporter les URLs au lieu de télécharger (pour telechargeur_batch.py)")
     p.add_argument("--simulation", action="store_true",
                    help="Lister les documents sans rien télécharger")
     p.add_argument("--profondeur", type=int, default=None, metavar="N",
@@ -600,8 +587,6 @@ Exemples :
                    help="Pause entre requêtes pour ménager le serveur (défaut : 0)")
     p.add_argument("--sans-colles", action="store_true",
                    help="Ne pas récupérer les programmes de colles")
-    p.add_argument("--cookie-sortie", metavar="FICHIER",
-                   help="Sauvegarder les cookies de session dans un fichier")
     p.add_argument("--accepter-conditions", action="store_true",
                    help="Accepter les conditions d'usage sans invite (1er lancement)")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
@@ -642,9 +627,6 @@ def main():
         sys.exit(1)
     print(vert("Connexion réussie."))
 
-    if args.cookie_sortie:
-        sauvegarder_cookies(session, Path(args.cookie_sortie))
-
     # ── Exploration ──────────────────────────────────────────────────────────
     prof = "illimitée" if args.profondeur is None else args.profondeur
     print(f"\nExploration des documents (profondeur {prof}) …")
@@ -668,21 +650,6 @@ def main():
         sys.exit(0)
 
     print(f"\n{gras(str(len(documents)))} document(s) trouvé(s).\n")
-
-    # ── Export liste seule ───────────────────────────────────────────────────
-    if args.liste:
-        with open(args.liste, "w", encoding="utf-8") as f:
-            f.write(f"# URLs de documents — {url}\n")
-            f.write(f"# python telechargeur_batch.py {args.liste} --cookie-fichier cookies.txt\n\n")
-            for d in sorted(documents, key=lambda x: (x.get("chemin", ""), x["nom"])):
-                if "url" not in d:          # programme de colles textuel : pas d'URL
-                    continue
-                chemin = d.get("chemin", "")
-                f.write(f"{d['url']}  # {chemin + '/' if chemin else ''}{d['nom']}\n")
-        print(vert(f"Liste exportée : {args.liste}  ({len(documents)} URLs)"))
-        if not args.cookie_sortie:
-            print(jaune("Astuce : ajoutez --cookie-sortie cookies.txt pour pouvoir télécharger ensuite."))
-        sys.exit(0)
 
     # ── Téléchargement ───────────────────────────────────────────────────────
     # Tout est rangé dans un sous-dossier nommé d'après la classe.

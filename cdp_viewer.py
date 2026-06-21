@@ -22,6 +22,8 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
+__version__ = "1.1.0"
+
 PAGE_HTML = r"""<!doctype html>
 <html lang="fr">
 <head>
@@ -904,6 +906,8 @@ def main():
                    help="Port d'écoute (défaut : 8000)")
     p.add_argument("--no-browser", action="store_true",
                    help="Ne pas ouvrir le navigateur automatiquement")
+    p.add_argument("--version", action="version",
+                   version=f"cdp-viewer {__version__}")
     args = p.parse_args()
 
     racine = Path(args.dossier)
