@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cdp_scraper
-import cdp_viewer
+import cdp_viewer  # pour le test garde-fou de version (scraper == viewer)
 
 
 class TestVersion(unittest.TestCase):

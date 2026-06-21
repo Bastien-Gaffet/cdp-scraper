@@ -305,7 +305,8 @@ class TestVersionCLI(unittest.TestCase):
             capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(res.returncode, 0)
-        self.assertIn("cdp-viewer 1.1.0", res.stdout)
+        # argparse action="version" écrit sur stdout (3.4+) ; on couvre les deux flux.
+        self.assertIn("cdp-viewer 1.1.0", res.stdout + res.stderr)
 
 
 if __name__ == "__main__":
