@@ -25,12 +25,19 @@ class TestDatesArbre(unittest.TestCase):
         (self.racine / "PCSI" / "Phys").mkdir(parents=True)
         (self.racine / "PCSI" / "Phys" / "tp.pdf").write_bytes(b"x")
         (self.racine / "PCSI" / "Phys" / "sans_manif.pdf").write_bytes(b"y")
+        (self.racine / "PCSI" / "Phys" / "maj.pdf").write_bytes(b"z")
         man = cdp_manifeste._vide()
         man["documents"]["1"] = {
             "url": "u", "nom": "tp.pdf", "chemin": "Phys", "type": "pdf",
             "empreinte": "", "taille": 1, "statut": "ok",
             "premiere_vue": "2026-06-01T08:00:00",
             "derniere_maj": "2026-06-01T08:00:00", "erreur": None}
+        # Document ajouté il y a longtemps mais re-téléchargé récemment.
+        man["documents"]["2"] = {
+            "url": "u", "nom": "maj.pdf", "chemin": "Phys", "type": "pdf",
+            "empreinte": "", "taille": 1, "statut": "ok",
+            "premiere_vue": "2026-01-01T08:00:00",
+            "derniere_maj": "2026-06-15T08:00:00", "erreur": None}
         cdp_manifeste.enregistrer(self.racine / "PCSI", man)
 
     def tearDown(self):
@@ -52,9 +59,19 @@ class TestDatesArbre(unittest.TestCase):
 
     def test_repli_mtime_si_absent_du_manifeste(self):
         arbre = cdp_viewer.construire_arbre(self.racine, "PCSI")
-        date = self._fichier(arbre, "sans_manif.pdf")["date"]
-        self.assertTrue(date)          # une date ISO non vide (mtime)
-        self.assertIn("T", date)
+        f = self._fichier(arbre, "sans_manif.pdf")
+        self.assertTrue(f["date"])          # une date ISO non vide (mtime)
+        self.assertIn("T", f["date"])
+        self.assertEqual(f["date_maj"], f["date"])  # repli : maj = ajout = mtime
+
+    def test_date_maj_vient_de_derniere_maj(self):
+        # La date affichée reste l'ajout ; date_maj porte la dernière modif
+        # (pour que la vue « récemment ajoutés » fasse réapparaître un document
+        # re-téléchargé).
+        arbre = cdp_viewer.construire_arbre(self.racine, "PCSI")
+        f = self._fichier(arbre, "maj.pdf")
+        self.assertEqual(f["date"], "2026-01-01T08:00:00")
+        self.assertEqual(f["date_maj"], "2026-06-15T08:00:00")
 
 
 class TestResoudreDansRacine(unittest.TestCase):

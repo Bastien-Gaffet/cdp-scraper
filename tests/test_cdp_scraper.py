@@ -258,6 +258,34 @@ class TestTelechargerAtomique(unittest.TestCase):
         self.assertEqual(nom, "Programme.html")
         self.assertTrue((self.base / "Maths" / "Programme.html").is_file())
 
+    def test_coupure_en_flux_echec_sans_fichier_ni_part(self):
+        # Une coupure réseau en plein téléchargement ne doit laisser ni fichier
+        # cible (tronqué) ni .part résiduel : statut "echec", rien sur le disque.
+        class _RespCoupe:
+            headers = {}
+
+            def raise_for_status(self):
+                pass
+
+            def iter_content(self, chunk_size=65536):
+                yield b"debut"
+                raise cdp_scraper.requests.ConnectionError("coupure")
+
+            def close(self):
+                pass
+
+        class _SessionCoupe:
+            def get(self, url, timeout=None, stream=False):
+                return _RespCoupe()
+
+        doc = {"url": "https://x/download?id=1&dl", "id": "1",
+               "nom": "cours.pdf", "type": "pdf", "chemin": "Phys"}
+        statut, taille, _ = cdp_scraper.telecharger(_SessionCoupe(), doc, self.base, False, 1, 1)
+        self.assertEqual(statut, "echec")
+        self.assertEqual(taille, 0)
+        self.assertFalse((self.base / "Phys" / "cours.pdf").exists())
+        self.assertEqual(list((self.base / "Phys").glob("*.part")), [])
+
 
 class TestProgcolles(unittest.TestCase):
     BASE = "https://cahier-de-prepa.fr/maclasse"

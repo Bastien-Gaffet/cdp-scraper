@@ -324,8 +324,8 @@ function rendreRecents(arbre) {
   elExplorateur.appendChild(barre);
 
   const recents = collecter(arbre, [])
-    .filter(f => joursDepuis(f.date) <= fenetreRecents)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+    .filter(f => joursDepuis(f.date_maj || f.date) <= fenetreRecents)
+    .sort((a, b) => new Date(b.date_maj || b.date) - new Date(a.date_maj || a.date));
   if (!recents.length) {
     const v = document.createElement("div"); v.className = "vide";
     v.textContent = "Aucun ajout dans les " + fenetreRecents + " derniers jours.";
@@ -614,7 +614,12 @@ def lister_classes(racine: Path) -> list[str]:
 
 def _noeud(racine: Path, chemin_abs: Path, dates: dict) -> dict:
     """Construit récursivement le nœud (dossier ou fichier) pour `chemin_abs`.
-    `dates` : index {chemin_relatif_posix: date_iso} issu du manifeste."""
+    `dates` : index {chemin_relatif_posix: {"ajout", "maj"}} issu du manifeste.
+
+    Chaque fichier porte `date` (date d'ajout, affichée) et `date_maj` (date du
+    dernier changement, utilisée par la vue « récemment ajoutés » pour qu'un
+    document mis à jour réapparaisse). À défaut de manifeste, les deux valent le
+    mtime du fichier."""
     rel = chemin_abs.relative_to(racine).as_posix()
     if chemin_abs.is_dir():
         enfants = [_noeud(racine, p, dates) for p in chemin_abs.iterdir()
@@ -623,9 +628,13 @@ def _noeud(racine: Path, chemin_abs: Path, dates: dict) -> dict:
         enfants.sort(key=lambda n: (n["type"] != "dossier", n["nom"].lower()))
         return {"nom": chemin_abs.name, "type": "dossier", "chemin": rel, "enfants": enfants}
     ext = chemin_abs.suffix.lstrip(".").lower()
-    date = dates.get(rel)
+    info = dates.get(rel) or {}
+    date = info.get("ajout") or ""
+    date_maj = info.get("maj") or ""
     if not date:
         date = datetime.fromtimestamp(chemin_abs.stat().st_mtime).isoformat(timespec="seconds")
+    if not date_maj:
+        date_maj = date
     return {
         "nom": chemin_abs.name,
         "type": "fichier",
@@ -633,13 +642,14 @@ def _noeud(racine: Path, chemin_abs: Path, dates: dict) -> dict:
         "taille": chemin_abs.stat().st_size,
         "ext": ext,
         "date": date,
+        "date_maj": date_maj,
     }
 
 
 def _index_dates(dossier_classe: Path, classe: str) -> dict:
-    """Index {chemin_relatif_posix: premiere_vue} depuis le manifeste de la classe.
-    Les chemins sont relatifs à la racine (préfixés par le nom de classe), comme
-    les `chemin` des nœuds."""
+    """Index {chemin_relatif_posix: {"ajout": premiere_vue, "maj": derniere_maj}}
+    depuis le manifeste de la classe. Les chemins sont relatifs à la racine
+    (préfixés par le nom de classe), comme les `chemin` des nœuds."""
     try:
         manifeste = cdp_manifeste.charger(dossier_classe)
     except cdp_manifeste.ManifesteVersionFuture:
@@ -651,7 +661,8 @@ def _index_dates(dossier_classe: Path, classe: str) -> dict:
             continue
         chemin = e.get("chemin", "")
         rel = f"{classe}/{chemin}/{nom}" if chemin else f"{classe}/{nom}"
-        index[rel] = e.get("premiere_vue", "")
+        ajout = e.get("premiere_vue", "")
+        index[rel] = {"ajout": ajout, "maj": e.get("derniere_maj") or ajout}
     return index
 
 
