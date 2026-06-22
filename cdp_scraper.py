@@ -616,6 +616,53 @@ Exemples :
     return p.parse_args()
 
 
+def executer_reprise(session, dossier: Path, delai: float):
+    """Mode --reprise : retélécharge les seuls échecs/manquants listés au
+    manifeste, sans re-explorer l'arborescence."""
+    try:
+        manifeste = cdp_manifeste.charger(dossier)
+    except cdp_manifeste.ManifesteVersionFuture as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+    if not manifeste.get("documents"):
+        print(jaune("\nAucun manifeste à reprendre."))
+        print(jaune("Lancez d'abord une synchronisation normale."))
+        return
+
+    a_faire = cdp_manifeste.entrees_a_reprendre(manifeste, dossier)
+    if not a_faire:
+        print(vert("\nRien à reprendre : tout est à jour."))
+        return
+
+    a_faire.sort(key=lambda d: (d.get("chemin", ""), d["nom"]))
+    total = len(a_faire)
+    print(f"\nReprise de {gras(str(total))} téléchargement(s) en échec …\n")
+
+    repris = 0
+    for i, doc in enumerate(a_faire, 1):
+        statut, taille, nom = telecharger(session, doc, dossier, False, i, total)
+        erreur = "échec de téléchargement" if statut == "echec" else None
+        cdp_manifeste.maj_entree(manifeste, doc, statut, nom, taille,
+                                 datetime.now().isoformat(timespec="seconds"),
+                                 erreur=erreur)
+        if statut == "ok":
+            repris += 1
+        if delai:
+            time.sleep(delai)
+
+    manifeste["derniere_synchro"] = datetime.now().isoformat(timespec="seconds")
+    cdp_manifeste.enregistrer(dossier, manifeste)
+
+    persistants = total - repris
+    print()
+    print(gras("─── RÉSUMÉ " + "─" * 40))
+    print(f"  Repris            : {vert(str(repris))}")
+    if persistants:
+        print(f"  Échecs persistants : {rouge(str(persistants))}")
+    print()
+
+
 def main():
     args = parse_args()
 
