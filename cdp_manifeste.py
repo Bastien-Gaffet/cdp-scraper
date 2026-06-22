@@ -67,3 +67,48 @@ def empreinte(doc: dict) -> str:
     if contenu is not None:
         return "h:" + hashlib.sha256(contenu.encode("utf-8")).hexdigest()[:16]
     return doc.get("empreinte", "") or ""
+
+
+def _present(dossier_classe: Path, entree: dict) -> bool:
+    """True si le fichier réel décrit par l'entrée existe sur le disque."""
+    nom = entree.get("nom")
+    if not nom:
+        return False
+    chemin = entree.get("chemin", "")
+    cible = Path(dossier_classe) / chemin / nom if chemin else Path(dossier_classe) / nom
+    return cible.is_file()
+
+
+def planifier(crawl: list, manifeste: dict, dossier_classe: Path,
+              complet: bool = False) -> dict:
+    """Range chaque document du crawl par comparaison avec le manifeste.
+
+    Renvoie {"nouveau", "modifie", "a_jour", "a_reprendre"} (listes de docs du
+    crawl) et "disparus" (ids du manifeste absents du crawl). `complet` force le
+    re-téléchargement de tout ce qui est connu.
+    """
+    docs = manifeste.get("documents", {})
+    plan = {"nouveau": [], "modifie": [], "a_jour": [], "a_reprendre": [],
+            "disparus": []}
+    vus = set()
+    for d in crawl:
+        ident = d["id"]
+        vus.add(ident)
+        entree = docs.get(ident)
+        if entree is None:
+            plan["nouveau"].append(d)
+            continue
+        if complet:
+            plan["modifie"].append(d)
+            continue
+        if entree.get("statut") != "ok" or not _present(dossier_classe, entree):
+            plan["a_reprendre"].append(d)
+            continue
+        emp_now = empreinte(d)
+        emp_old = entree.get("empreinte", "")
+        if emp_now and emp_old and emp_now != emp_old:
+            plan["modifie"].append(d)
+        else:
+            plan["a_jour"].append(d)
+    plan["disparus"] = [i for i in docs if i not in vus]
+    return plan

@@ -68,5 +68,86 @@ class TestEmpreinte(unittest.TestCase):
         self.assertEqual(c1, c2)
 
 
+class TestPlanifier(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.classe = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _ecrire(self, chemin, nom):
+        d = self.classe / chemin
+        d.mkdir(parents=True, exist_ok=True)
+        (d / nom).write_bytes(b"x")
+
+    def _entree(self, **kw):
+        base = {"url": "u", "nom": "f.pdf", "chemin": "Phys", "type": "pdf",
+                "empreinte": "pdf, 1 jan, 100 ko", "taille": 1, "statut": "ok",
+                "premiere_vue": "2026-01-01T00:00:00",
+                "derniere_maj": "2026-01-01T00:00:00", "erreur": None}
+        base.update(kw)
+        return base
+
+    def test_id_inconnu_est_nouveau(self):
+        crawl = [{"id": "9", "empreinte": "pdf, 1 jan, 100 ko",
+                  "chemin": "Phys", "nom": "f.pdf"}]
+        plan = cdp_manifeste.planifier(crawl, cdp_manifeste._vide(), self.classe)
+        self.assertEqual([d["id"] for d in plan["nouveau"]], ["9"])
+
+    def test_empreinte_identique_et_present_est_a_jour(self):
+        self._ecrire("Phys", "f.pdf")
+        man = cdp_manifeste._vide()
+        man["documents"]["9"] = self._entree()
+        crawl = [{"id": "9", "empreinte": "pdf, 1 jan, 100 ko"}]
+        plan = cdp_manifeste.planifier(crawl, man, self.classe)
+        self.assertEqual([d["id"] for d in plan["a_jour"]], ["9"])
+
+    def test_empreinte_differente_est_modifie(self):
+        self._ecrire("Phys", "f.pdf")
+        man = cdp_manifeste._vide()
+        man["documents"]["9"] = self._entree()
+        crawl = [{"id": "9", "empreinte": "pdf, 2 fev, 200 ko"}]
+        plan = cdp_manifeste.planifier(crawl, man, self.classe)
+        self.assertEqual([d["id"] for d in plan["modifie"]], ["9"])
+
+    def test_fichier_absent_est_a_reprendre(self):
+        man = cdp_manifeste._vide()
+        man["documents"]["9"] = self._entree()  # fichier jamais écrit
+        crawl = [{"id": "9", "empreinte": "pdf, 1 jan, 100 ko"}]
+        plan = cdp_manifeste.planifier(crawl, man, self.classe)
+        self.assertEqual([d["id"] for d in plan["a_reprendre"]], ["9"])
+
+    def test_statut_echec_est_a_reprendre(self):
+        self._ecrire("Phys", "f.pdf")
+        man = cdp_manifeste._vide()
+        man["documents"]["9"] = self._entree(statut="echec")
+        crawl = [{"id": "9", "empreinte": "pdf, 1 jan, 100 ko"}]
+        plan = cdp_manifeste.planifier(crawl, man, self.classe)
+        self.assertEqual([d["id"] for d in plan["a_reprendre"]], ["9"])
+
+    def test_id_manquant_du_crawl_est_disparu(self):
+        man = cdp_manifeste._vide()
+        man["documents"]["9"] = self._entree()
+        plan = cdp_manifeste.planifier([], man, self.classe)
+        self.assertEqual(plan["disparus"], ["9"])
+
+    def test_complet_force_modifie(self):
+        self._ecrire("Phys", "f.pdf")
+        man = cdp_manifeste._vide()
+        man["documents"]["9"] = self._entree()
+        crawl = [{"id": "9", "empreinte": "pdf, 1 jan, 100 ko"}]
+        plan = cdp_manifeste.planifier(crawl, man, self.classe, complet=True)
+        self.assertEqual([d["id"] for d in plan["modifie"]], ["9"])
+
+    def test_empreinte_vide_et_present_reste_a_jour(self):
+        self._ecrire("Phys", "f.pdf")
+        man = cdp_manifeste._vide()
+        man["documents"]["9"] = self._entree(empreinte="")
+        crawl = [{"id": "9"}]  # pas d'empreinte non plus
+        plan = cdp_manifeste.planifier(crawl, man, self.classe)
+        self.assertEqual([d["id"] for d in plan["a_jour"]], ["9"])
+
+
 if __name__ == "__main__":
     unittest.main()
