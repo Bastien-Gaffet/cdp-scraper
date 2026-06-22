@@ -15,6 +15,46 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cdp_viewer
+import cdp_manifeste
+
+
+class TestDatesArbre(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.racine = Path(self.tmp.name)
+        (self.racine / "PCSI" / "Phys").mkdir(parents=True)
+        (self.racine / "PCSI" / "Phys" / "tp.pdf").write_bytes(b"x")
+        (self.racine / "PCSI" / "Phys" / "sans_manif.pdf").write_bytes(b"y")
+        man = cdp_manifeste._vide()
+        man["documents"]["1"] = {
+            "url": "u", "nom": "tp.pdf", "chemin": "Phys", "type": "pdf",
+            "empreinte": "", "taille": 1, "statut": "ok",
+            "premiere_vue": "2026-06-01T08:00:00",
+            "derniere_maj": "2026-06-01T08:00:00", "erreur": None}
+        cdp_manifeste.enregistrer(self.racine / "PCSI", man)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _fichier(self, arbre, nom):
+        for d in arbre["enfants"]:
+            if d["type"] == "dossier":
+                t = self._fichier(d, nom)
+                if t:
+                    return t
+            elif d["nom"] == nom:
+                return d
+        return None
+
+    def test_date_vient_du_manifeste(self):
+        arbre = cdp_viewer.construire_arbre(self.racine, "PCSI")
+        self.assertEqual(self._fichier(arbre, "tp.pdf")["date"], "2026-06-01T08:00:00")
+
+    def test_repli_mtime_si_absent_du_manifeste(self):
+        arbre = cdp_viewer.construire_arbre(self.racine, "PCSI")
+        date = self._fichier(arbre, "sans_manif.pdf")["date"]
+        self.assertTrue(date)          # une date ISO non vide (mtime)
+        self.assertIn("T", date)
 
 
 class TestResoudreDansRacine(unittest.TestCase):

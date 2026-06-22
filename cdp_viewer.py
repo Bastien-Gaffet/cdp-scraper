@@ -19,8 +19,11 @@ import sys
 import tokenize
 import urllib.parse
 import webbrowser
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+
+import cdp_manifeste
 
 __version__ = "1.2.0"
 
@@ -548,36 +551,61 @@ def lister_classes(racine: Path) -> list[str]:
                   if p.is_dir() and not p.name.startswith("."))
 
 
-def _noeud(racine: Path, chemin_abs: Path) -> dict:
-    """Construit récursivement le nœud (dossier ou fichier) pour `chemin_abs`."""
+def _noeud(racine: Path, chemin_abs: Path, dates: dict) -> dict:
+    """Construit récursivement le nœud (dossier ou fichier) pour `chemin_abs`.
+    `dates` : index {chemin_relatif_posix: date_iso} issu du manifeste."""
     rel = chemin_abs.relative_to(racine).as_posix()
     if chemin_abs.is_dir():
-        enfants = [_noeud(racine, p) for p in chemin_abs.iterdir()
+        enfants = [_noeud(racine, p, dates) for p in chemin_abs.iterdir()
                    if not p.name.startswith(".")]
         # Dossiers d'abord, puis tri alphabétique insensible à la casse.
         enfants.sort(key=lambda n: (n["type"] != "dossier", n["nom"].lower()))
         return {"nom": chemin_abs.name, "type": "dossier", "chemin": rel, "enfants": enfants}
     ext = chemin_abs.suffix.lstrip(".").lower()
+    date = dates.get(rel)
+    if not date:
+        date = datetime.fromtimestamp(chemin_abs.stat().st_mtime).isoformat(timespec="seconds")
     return {
         "nom": chemin_abs.name,
         "type": "fichier",
         "chemin": rel,
         "taille": chemin_abs.stat().st_size,
         "ext": ext,
+        "date": date,
     }
+
+
+def _index_dates(dossier_classe: Path, classe: str) -> dict:
+    """Index {chemin_relatif_posix: premiere_vue} depuis le manifeste de la classe.
+    Les chemins sont relatifs à la racine (préfixés par le nom de classe), comme
+    les `chemin` des nœuds."""
+    try:
+        manifeste = cdp_manifeste.charger(dossier_classe)
+    except cdp_manifeste.ManifesteVersionFuture:
+        return {}
+    index = {}
+    for e in manifeste.get("documents", {}).values():
+        nom = e.get("nom")
+        if not nom:
+            continue
+        chemin = e.get("chemin", "")
+        rel = f"{classe}/{chemin}/{nom}" if chemin else f"{classe}/{nom}"
+        index[rel] = e.get("premiere_vue", "")
+    return index
 
 
 def construire_arbre(racine: Path, classe: str) -> dict | None:
     """Arbre de la classe `classe` sous `racine`, ou None si elle n'existe pas.
 
     Les `chemin` des nœuds sont relatifs à `racine` (ils incluent le dossier de
-    classe) et utilisables tels quels dans /file/<chemin>.
-    """
+    classe) et utilisables tels quels dans /file/<chemin>. Chaque fichier porte
+    une `date` (premiere_vue du manifeste, sinon mtime)."""
     racine = racine.resolve()
     base = resoudre_dans_racine(racine, classe)
     if base is None or not base.is_dir():
         return None
-    return _noeud(racine, base)
+    dates = _index_dates(base, classe)
+    return _noeud(racine, base, dates)
 
 
 # Extensions servies en text/plain pour s'afficher dans le navigateur plutôt
