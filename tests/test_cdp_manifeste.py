@@ -149,5 +149,84 @@ class TestPlanifier(unittest.TestCase):
         self.assertEqual([d["id"] for d in plan["a_jour"]], ["9"])
 
 
+class TestMajEntree(unittest.TestCase):
+    def setUp(self):
+        self.man = cdp_manifeste._vide()
+        self.doc = {"id": "9", "url": "https://x/download?id=9&dl",
+                    "nom": "listing.pdf", "chemin": "Phys", "type": "pdf",
+                    "empreinte": "pdf, 1 jan, 100 ko"}
+
+    def test_creation_pose_premiere_vue(self):
+        cdp_manifeste.maj_entree(self.man, self.doc, "ok", "reel.pdf", 1234,
+                                 "2026-06-22T10:00:00")
+        e = self.man["documents"]["9"]
+        self.assertEqual(e["premiere_vue"], "2026-06-22T10:00:00")
+        self.assertEqual(e["derniere_maj"], "2026-06-22T10:00:00")
+        self.assertEqual(e["nom"], "reel.pdf")
+        self.assertEqual(e["taille"], 1234)
+        self.assertEqual(e["statut"], "ok")
+        self.assertEqual(e["empreinte"], "pdf, 1 jan, 100 ko")
+        self.assertIsNone(e["erreur"])
+
+    def test_maj_conserve_premiere_vue(self):
+        cdp_manifeste.maj_entree(self.man, self.doc, "ok", "reel.pdf", 1,
+                                 "2026-01-01T00:00:00")
+        cdp_manifeste.maj_entree(self.man, self.doc, "ok", "reel.pdf", 2,
+                                 "2026-06-22T10:00:00")
+        e = self.man["documents"]["9"]
+        self.assertEqual(e["premiere_vue"], "2026-01-01T00:00:00")
+        self.assertEqual(e["derniere_maj"], "2026-06-22T10:00:00")
+
+    def test_echec_enregistre_erreur(self):
+        cdp_manifeste.maj_entree(self.man, self.doc, "echec", "listing.pdf", 0,
+                                 "2026-06-22T10:00:00", erreur="500")
+        e = self.man["documents"]["9"]
+        self.assertEqual(e["statut"], "echec")
+        self.assertEqual(e["erreur"], "500")
+
+
+class TestMarquerDisparus(unittest.TestCase):
+    def test_marque_statut_disparu(self):
+        man = cdp_manifeste._vide()
+        man["documents"]["9"] = {"statut": "ok"}
+        cdp_manifeste.marquer_disparus(man, ["9"])
+        self.assertEqual(man["documents"]["9"]["statut"], "disparu")
+
+
+class TestEntreesAReprendre(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.classe = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_selectionne_echecs_avec_url(self):
+        man = cdp_manifeste._vide()
+        man["documents"]["1"] = {"url": "u1", "nom": "a.pdf", "chemin": "P",
+                                 "type": "pdf", "statut": "echec"}
+        man["documents"]["2"] = {"url": "u2", "nom": "b.pdf", "chemin": "P",
+                                 "type": "pdf", "statut": "ok"}
+        (self.classe / "P").mkdir()
+        (self.classe / "P" / "b.pdf").write_bytes(b"x")  # 2 présent et ok
+        docs = cdp_manifeste.entrees_a_reprendre(man, self.classe)
+        self.assertEqual([d["id"] for d in docs], ["1"])
+        self.assertEqual(docs[0]["url"], "u1")
+
+    def test_inclut_ok_mais_fichier_manquant(self):
+        man = cdp_manifeste._vide()
+        man["documents"]["3"] = {"url": "u3", "nom": "c.pdf", "chemin": "P",
+                                 "type": "pdf", "statut": "ok"}  # fichier absent
+        docs = cdp_manifeste.entrees_a_reprendre(man, self.classe)
+        self.assertEqual([d["id"] for d in docs], ["3"])
+
+    def test_ignore_entrees_sans_url(self):
+        man = cdp_manifeste._vide()
+        man["documents"]["pc_x"] = {"nom": "Programme.html", "chemin": "Maths",
+                                    "statut": "echec"}  # pas d'url
+        docs = cdp_manifeste.entrees_a_reprendre(man, self.classe)
+        self.assertEqual(docs, [])
+
+
 if __name__ == "__main__":
     unittest.main()

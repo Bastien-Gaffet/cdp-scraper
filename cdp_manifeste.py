@@ -112,3 +112,47 @@ def planifier(crawl: list, manifeste: dict, dossier_classe: Path,
             plan["a_jour"].append(d)
     plan["disparus"] = [i for i in docs if i not in vus]
     return plan
+
+
+def maj_entree(manifeste: dict, doc: dict, statut: str, nom: str,
+               taille: int, quand: str, erreur=None) -> None:
+    """Crée ou met à jour l'entrée du document `doc`. Pose `premiere_vue` au
+    premier ajout et la conserve ensuite ; `derniere_maj` à chaque appel."""
+    docs = manifeste.setdefault("documents", {})
+    entree = docs.get(doc["id"])
+    if entree is None:
+        entree = {"premiere_vue": quand}
+        docs[doc["id"]] = entree
+    entree.update({
+        "url": doc.get("url"),
+        "nom": nom,
+        "chemin": doc.get("chemin", ""),
+        "type": doc.get("type", ""),
+        "empreinte": empreinte(doc),
+        "taille": taille,
+        "statut": statut,
+        "derniere_maj": quand,
+        "erreur": erreur,
+    })
+
+
+def marquer_disparus(manifeste: dict, ids_disparus: list) -> None:
+    """Marque `statut=disparu` les entrées listées (fichiers conservés)."""
+    docs = manifeste.get("documents", {})
+    for ident in ids_disparus:
+        if ident in docs:
+            docs[ident]["statut"] = "disparu"
+
+
+def entrees_a_reprendre(manifeste: dict, dossier_classe: Path) -> list:
+    """Documents à reprendre (mode --reprise) : entrées en échec OU dont le
+    fichier manque, et qui ont une url (vrais téléchargements). Renvoie des docs
+    prêts pour telecharger (id, url, nom, chemin, type)."""
+    docs = []
+    for ident, e in manifeste.get("documents", {}).items():
+        if not e.get("url"):
+            continue
+        if e.get("statut") == "echec" or not _present(dossier_classe, e):
+            docs.append({"id": ident, "url": e["url"], "nom": e.get("nom", ""),
+                         "chemin": e.get("chemin", ""), "type": e.get("type", "")})
+    return docs
