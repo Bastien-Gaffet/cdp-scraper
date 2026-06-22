@@ -358,5 +358,25 @@ class TestUtilitaires(unittest.TestCase):
         self.assertEqual(cdp_scraper._cle_rep("https://x/docs"), "")
 
 
+class TestDrapeauxSynchro(unittest.TestCase):
+    def test_complet_et_reprise_exclusifs(self):
+        with mock.patch.object(sys, "argv",
+                               ["cdp_scraper.py", "--complet", "--reprise"]):
+            with self.assertRaises(SystemExit):
+                cdp_scraper.parse_args()
+
+    def test_complet_seul_ok(self):
+        with mock.patch.object(sys, "argv", ["cdp_scraper.py", "--complet"]):
+            args = cdp_scraper.parse_args()
+        self.assertTrue(args.complet)
+        self.assertFalse(args.reprise)
+
+    def test_reprise_seul_ok(self):
+        with mock.patch.object(sys, "argv", ["cdp_scraper.py", "--reprise"]):
+            args = cdp_scraper.parse_args()
+        self.assertTrue(args.reprise)
+        self.assertFalse(args.complet)
+
+
 if __name__ == "__main__":
     unittest.main()

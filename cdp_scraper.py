@@ -605,6 +605,12 @@ Exemples :
                    help="Ne pas récupérer les programmes de colles")
     p.add_argument("--accepter-conditions", action="store_true",
                    help="Accepter les conditions d'usage sans invite (1er lancement)")
+    synchro = p.add_mutually_exclusive_group()
+    synchro.add_argument("--complet", action="store_true",
+                         help="Ignorer le manifeste et tout re-télécharger (resynchro intégrale)")
+    synchro.add_argument("--reprise", action="store_true",
+                         help="Reprendre uniquement les téléchargements en échec, sans re-explorer\n"
+                              "(les programmes de colles en texte ne sont pas concernés)")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
     return p.parse_args()
 
