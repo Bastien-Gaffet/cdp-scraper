@@ -31,6 +31,7 @@ import getpass
 import argparse
 from pathlib import Path
 from datetime import datetime
+import cdp_manifeste
 from urllib.parse import urljoin, urlsplit, unquote
 
 __version__ = "1.2.0"
@@ -649,6 +650,13 @@ def main():
         sys.exit(1)
     print(vert("Connexion réussie."))
 
+    nom_classe = nom_sur(urlsplit(url).path.strip("/").split("/")[-1]) or "classe"
+    dossier = Path(sortie) / nom_classe
+
+    if args.reprise:
+        executer_reprise(session, dossier, args.delai)
+        return
+
     # ── Exploration ──────────────────────────────────────────────────────────
     prof = "illimitée" if args.profondeur is None else args.profondeur
     print(f"\nExploration des documents (profondeur {prof}) …")
@@ -671,43 +679,68 @@ def main():
         print(jaune("La classe n'a peut-être pas de documents accessibles avec ce compte."))
         sys.exit(0)
 
-    print(f"\n{gras(str(len(documents)))} document(s) trouvé(s).\n")
+    print(f"\n{gras(str(len(documents)))} document(s) trouvé(s).")
 
-    # ── Téléchargement ───────────────────────────────────────────────────────
-    # Tout est rangé dans un sous-dossier nommé d'après la classe.
-    nom_classe = nom_sur(urlsplit(url).path.strip("/").split("/")[-1]) or "classe"
-    dossier = Path(sortie) / nom_classe
+    # ── Planification (synchro incrémentale) ──────────────────────────────────
+    try:
+        manifeste = cdp_manifeste.charger(dossier)
+    except cdp_manifeste.ManifesteVersionFuture as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+    plan = cdp_manifeste.planifier(documents, manifeste, dossier, complet=args.complet)
+    a_faire = plan["nouveau"] + plan["modifie"] + plan["a_reprendre"]
+    a_faire.sort(key=lambda d: (d.get("chemin", ""), d["nom"]))
+
+    print(f"  {gras(str(len(plan['nouveau'])))} nouveau(x), "
+          f"{gras(str(len(plan['modifie'])))} mis à jour, "
+          f"{gras(str(len(plan['a_reprendre'])))} à reprendre, "
+          f"{dim(str(len(plan['a_jour'])) + ' à jour')}.\n")
+
     if not simulation:
         dossier.mkdir(parents=True, exist_ok=True)
         print(f"Destination : {gras(str(dossier.resolve()))}\n")
 
-    total = len(documents)
-    documents.sort(key=lambda d: (d.get("chemin", ""), d["nom"]))
-    compteur = {"ok": 0, "existe": 0, "echec": 0, "simulation": 0}
-    volume   = {"ok": 0, "existe": 0, "simulation": 0}
-    for i, doc in enumerate(documents, 1):
-        statut, taille = telecharger(session, doc, dossier, simulation, i, total)
+    total = len(a_faire)
+    compteur = {"ok": 0, "echec": 0, "simulation": 0}
+    volume = {"ok": 0, "simulation": 0}
+    for i, doc in enumerate(a_faire, 1):
+        statut, taille, nom = telecharger(session, doc, dossier, simulation, i, total)
         compteur[statut] = compteur.get(statut, 0) + 1
         if statut in volume:
             volume[statut] += taille
+        if not simulation:
+            erreur = "échec de téléchargement" if statut == "echec" else None
+            cdp_manifeste.maj_entree(manifeste, doc, statut, nom, taille,
+                                     datetime.now().isoformat(timespec="seconds"),
+                                     erreur=erreur)
         if not simulation and args.delai:
             time.sleep(args.delai)
+
+    # ── Manifeste : disparus + enregistrement (hors simulation) ───────────────
+    if not simulation:
+        cdp_manifeste.marquer_disparus(manifeste, plan["disparus"])
+        manifeste["version"] = cdp_manifeste.VERSION
+        manifeste["classe"] = nom_classe
+        manifeste["url"] = url
+        manifeste["derniere_synchro"] = datetime.now().isoformat(timespec="seconds")
+        cdp_manifeste.enregistrer(dossier, manifeste)
 
     # ── Résumé ───────────────────────────────────────────────────────────────
     print()
     print(gras("─── RÉSUMÉ " + "─" * 40))
     if simulation:
-        print(f"  Documents à télécharger : {gras(str(compteur['simulation']))}")
-        print(f"  Volume estimé           : {gras(fmt_taille(volume['simulation']))}")
+        print(f"  À télécharger : {gras(str(compteur['simulation']))}")
+        print(f"  Volume estimé : {gras(fmt_taille(volume['simulation']))}")
+        print(f"  À jour (ignorés) : {dim(str(len(plan['a_jour'])))}")
         print(jaune("  (mode simulation — relancez sans --simulation pour télécharger)"))
     else:
-        print(f"  Téléchargés   : {vert(str(compteur['ok']))}   ({fmt_taille(volume['ok'])})")
-        if compteur["existe"]:
-            print(f"  Déjà présents : {dim(str(compteur['existe']))}   ({fmt_taille(volume['existe'])})")
+        print(f"  Nouveaux / mis à jour : {vert(str(compteur['ok']))}   ({fmt_taille(volume['ok'])})")
+        print(f"  À jour (ignorés)      : {dim(str(len(plan['a_jour'])))}")
         if compteur["echec"]:
-            print(f"  Échecs        : {rouge(str(compteur['echec']))}")
-        total_disque = volume["ok"] + volume["existe"]
-        print(f"  Volume total  : {gras(fmt_taille(total_disque))}")
+            print(f"  Échecs                : {rouge(str(compteur['echec']))}   (relançables avec --reprise)")
+        if plan["disparus"]:
+            print(f"  Disparus du serveur   : {jaune(str(len(plan['disparus'])))}   (fichiers conservés)")
         print(f"\n  Fichiers dans : {cyan(str(dossier.resolve()))}")
     print()
 
