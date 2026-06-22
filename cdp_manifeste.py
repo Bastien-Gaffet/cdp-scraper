@@ -55,3 +55,15 @@ def enregistrer(dossier_classe: Path, manifeste: dict) -> None:
     tmp.write_text(json.dumps(manifeste, ensure_ascii=False, indent=2),
                    encoding="utf-8")
     os.replace(tmp, cible)
+
+
+def empreinte(doc: dict) -> str:
+    """Chaîne d'empreinte d'un document pour détecter un changement.
+
+    - contenu généré localement (contenu_html) → hash court "h:<sha>".
+    - document normal → chaîne docdonnees brute (champ "empreinte"), ou "".
+    """
+    contenu = doc.get("contenu_html")
+    if contenu is not None:
+        return "h:" + hashlib.sha256(contenu.encode("utf-8")).hexdigest()[:16]
+    return doc.get("empreinte", "") or ""

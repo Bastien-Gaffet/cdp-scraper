@@ -48,5 +48,25 @@ class TestChargerEnregistrer(unittest.TestCase):
         self.assertEqual(residus, [])
 
 
+class TestEmpreinte(unittest.TestCase):
+    def test_doc_normal_utilise_docdonnees(self):
+        doc = {"id": "1", "empreinte": "pdf, 1 jan, 100 ko"}
+        self.assertEqual(cdp_manifeste.empreinte(doc), "pdf, 1 jan, 100 ko")
+
+    def test_doc_sans_empreinte_renvoie_vide(self):
+        self.assertEqual(cdp_manifeste.empreinte({"id": "1"}), "")
+
+    def test_contenu_genere_hashe(self):
+        a = cdp_manifeste.empreinte({"id": "pc_x", "contenu_html": "<p>A</p>"})
+        b = cdp_manifeste.empreinte({"id": "pc_x", "contenu_html": "<p>B</p>"})
+        self.assertTrue(a.startswith("h:"))
+        self.assertNotEqual(a, b)
+
+    def test_contenu_genere_stable(self):
+        c1 = cdp_manifeste.empreinte({"contenu_html": "<p>même</p>"})
+        c2 = cdp_manifeste.empreinte({"contenu_html": "<p>même</p>"})
+        self.assertEqual(c1, c2)
+
+
 if __name__ == "__main__":
     unittest.main()
