@@ -7,6 +7,27 @@ et le projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 La version est unique pour l'ensemble du projet : `cdp_scraper.py` et
 `cdp_viewer.py` portent le même numéro et sont publiés ensemble.
 
+## [1.2.0] - 2026-06-22
+
+### Ajouté
+- Synchronisation incrémentale : lors d'une nouvelle exécution, seuls les
+  documents nouveaux ou modifiés sont retéléchargés, grâce à un manifeste JSON
+  par classe (`.cdp-manifest.json`). La détection des changements s'appuie sur
+  les métadonnées déjà présentes dans le listing (aucune requête supplémentaire).
+- Option `--complet` : ignore le manifeste et force une resynchronisation
+  complète.
+- Option `--reprise` : retélécharge uniquement les éléments en échec ou
+  manquants, sans réexplorer l'arborescence.
+- Visualiseur : date d'ajout affichée sur chaque fichier et vue « Récemment
+  ajoutés » (fenêtre glissante 7 / 30 / 90 jours).
+
+### Corrigé
+- Les téléchargements sont écrits de façon atomique (fichier `.part` puis
+  renommage) : une interruption ne laisse plus un fichier tronqué pris pour
+  complet.
+- Un document mis à jour côté serveur est désormais retéléchargé (auparavant,
+  tout fichier déjà présent était systématiquement ignoré).
+
 ## [1.1.0] - 2026-06-21
 
 ### Ajouté
