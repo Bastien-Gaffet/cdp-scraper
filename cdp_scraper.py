@@ -412,7 +412,18 @@ def nom_fichier(resp: requests.Response, doc: dict) -> str:
     return nom_sur(nom)
 
 
+def _ecrire_atomique(cible: Path, donnees: bytes):
+    """Écrit `donnees` dans `cible` via un fichier .part puis renommage atomique."""
+    part = cible.with_name(cible.name + ".part")
+    part.write_bytes(donnees)
+    os.replace(part, cible)
+
+
 def telecharger(session, doc, dossier_base: Path, simulation: bool, i: int, total: int):
+    """Télécharge `doc` sous `dossier_base`. Écriture atomique (.part puis
+    renommage). Écrase toujours la cible (la décision de sauter est prise en
+    amont par la planification). Renvoie (statut, taille, nom_reel) où statut ∈
+    {ok, echec, simulation}."""
     chemin_rel = doc.get("chemin", "")
     dossier = dossier_base / chemin_rel if chemin_rel else dossier_base
     prefixe = f"[{i}/{total}]"
@@ -420,21 +431,22 @@ def telecharger(session, doc, dossier_base: Path, simulation: bool, i: int, tota
     # Contenu généré localement (programme de colles textuel) : pas de requête.
     if "contenu_html" in doc:
         donnees = doc["contenu_html"].encode("utf-8")
+        nom = nom_sur(doc["nom"])
         affiche = f"{chemin_rel + '/' if chemin_rel else ''}{doc['nom']}"
         if simulation:
             print(f"  {prefixe} {cyan('[SIM]')} {affiche}  {dim('(' + fmt_taille(len(donnees)) + ')')}")
-            return "simulation", len(donnees)
+            return "simulation", len(donnees), nom
         dossier.mkdir(parents=True, exist_ok=True)
-        (dossier / nom_sur(doc["nom"])).write_bytes(donnees)
+        _ecrire_atomique(dossier / nom, donnees)
         print(f"  {prefixe} {vert('[OK]')}  {affiche}  {dim('(' + fmt_taille(len(donnees)) + ')')}")
-        return "ok", len(donnees)
+        return "ok", len(donnees), nom
 
     try:
         resp = session.get(doc["url"], timeout=60, stream=True)
         resp.raise_for_status()
     except requests.RequestException as e:
         print(rouge(f"  {prefixe} [ERR] {doc['nom']} -> {e}"))
-        return "echec", 0
+        return "echec", 0, doc["nom"]
 
     nom = nom_fichier(resp, doc)
     affiche = f"{chemin_rel + '/' if chemin_rel else ''}{nom}"
@@ -443,28 +455,29 @@ def telecharger(session, doc, dossier_base: Path, simulation: bool, i: int, tota
         taille = int(resp.headers.get("Content-Length", 0))
         print(f"  {prefixe} {cyan('[SIM]')} {affiche}  {dim('(' + (fmt_taille(taille) if taille else '?') + ')')}")
         resp.close()
-        return "simulation", taille
+        return "simulation", taille, nom
 
     dossier.mkdir(parents=True, exist_ok=True)
     cible = dossier / nom
-    if cible.exists() and cible.stat().st_size > 0:
-        print(dim(f"  {prefixe} [DEJA] {affiche}"))
-        resp.close()
-        return "existe", cible.stat().st_size
-
+    part = cible.with_name(cible.name + ".part")
     taille = 0
     try:
-        with open(cible, "wb") as f:
+        with open(part, "wb") as f:
             for chunk in resp.iter_content(chunk_size=65536):
                 if chunk:
                     f.write(chunk)
                     taille += len(chunk)
+        os.replace(part, cible)
     except (requests.RequestException, OSError) as e:
+        try:
+            part.unlink(missing_ok=True)
+        except OSError:
+            pass
         print(rouge(f"  {prefixe} [ERR] {affiche} -> {e}"))
-        return "echec", 0
+        return "echec", 0, nom
 
     print(f"  {prefixe} {vert('[OK]')}  {affiche}  {dim('(' + fmt_taille(taille) + ')')}")
-    return "ok", taille
+    return "ok", taille, nom
 
 # ─── Mode interactif ─────────────────────────────────────────────────────────
 

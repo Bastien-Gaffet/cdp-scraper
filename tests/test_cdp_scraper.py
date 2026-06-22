@@ -1,5 +1,8 @@
 import unittest
 import sys
+import os
+import tempfile
+from unittest import mock
 from pathlib import Path
 
 # Les tests vivent dans tests/ ; on ajoute la racine du projet au sys.path pour
@@ -186,6 +189,74 @@ class TestAnalyserPage(unittest.TestCase):
         )
         _, docs = cdp_scraper.analyser_page(page, self.URL)
         self.assertEqual(docs[0]["empreinte"], "")
+
+
+class _RespTelecharge:
+    """Réponse de téléchargement minimale pour telecharger (stream=True)."""
+
+    def __init__(self, contenu: bytes, headers=None):
+        self._contenu = contenu
+        self.headers = headers or {}
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, chunk_size=65536):
+        yield self._contenu
+
+    def close(self):
+        pass
+
+
+class _SessionTelecharge:
+    def __init__(self, contenu: bytes, headers=None):
+        self._resp = _RespTelecharge(contenu, headers)
+
+    def get(self, url, timeout=None, stream=False):
+        return self._resp
+
+
+class TestTelechargerAtomique(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_ecrit_le_fichier_et_renvoie_nom(self):
+        sess = _SessionTelecharge(b"PDFDATA")
+        doc = {"url": "https://x/download?id=1&dl", "id": "1",
+               "nom": "cours.pdf", "type": "pdf", "chemin": "Phys"}
+        statut, taille, nom = cdp_scraper.telecharger(sess, doc, self.base, False, 1, 1)
+        self.assertEqual(statut, "ok")
+        self.assertEqual(taille, 7)
+        self.assertEqual((self.base / "Phys" / nom).read_bytes(), b"PDFDATA")
+
+    def test_ecrase_un_fichier_existant(self):
+        (self.base / "Phys").mkdir(parents=True)
+        (self.base / "Phys" / "cours.pdf").write_bytes(b"VIEUX")
+        sess = _SessionTelecharge(b"NOUVEAU")
+        doc = {"url": "https://x/download?id=1&dl", "id": "1",
+               "nom": "cours.pdf", "type": "pdf", "chemin": "Phys"}
+        statut, _, nom = cdp_scraper.telecharger(sess, doc, self.base, False, 1, 1)
+        self.assertEqual(statut, "ok")
+        self.assertEqual((self.base / "Phys" / "cours.pdf").read_bytes(), b"NOUVEAU")
+
+    def test_pas_de_part_residuel_apres_succes(self):
+        sess = _SessionTelecharge(b"DATA")
+        doc = {"url": "https://x/download?id=1&dl", "id": "1",
+               "nom": "cours.pdf", "type": "pdf", "chemin": ""}
+        cdp_scraper.telecharger(sess, doc, self.base, False, 1, 1)
+        self.assertEqual(list(self.base.glob("*.part")), [])
+
+    def test_contenu_genere_ecrit_html(self):
+        doc = {"id": "pc_x", "nom": "Programme.html", "chemin": "Maths",
+               "contenu_html": "<p>colles</p>"}
+        statut, _, nom = cdp_scraper.telecharger(None, doc, self.base, False, 1, 1)
+        self.assertEqual(statut, "ok")
+        self.assertEqual(nom, "Programme.html")
+        self.assertTrue((self.base / "Maths" / "Programme.html").is_file())
 
 
 class TestProgcolles(unittest.TestCase):
