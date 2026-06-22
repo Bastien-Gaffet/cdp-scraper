@@ -544,14 +544,16 @@ def lister_classes(racine: Path) -> list[str]:
     """Noms des sous-dossiers de `racine` (= les classes scrapées), triés."""
     if not racine.is_dir():
         return []
-    return sorted(p.name for p in racine.iterdir() if p.is_dir())
+    return sorted(p.name for p in racine.iterdir()
+                  if p.is_dir() and not p.name.startswith("."))
 
 
 def _noeud(racine: Path, chemin_abs: Path) -> dict:
     """Construit récursivement le nœud (dossier ou fichier) pour `chemin_abs`."""
     rel = chemin_abs.relative_to(racine).as_posix()
     if chemin_abs.is_dir():
-        enfants = [_noeud(racine, p) for p in chemin_abs.iterdir()]
+        enfants = [_noeud(racine, p) for p in chemin_abs.iterdir()
+                   if not p.name.startswith(".")]
         # Dossiers d'abord, puis tri alphabétique insensible à la casse.
         enfants.sort(key=lambda n: (n["type"] != "dossier", n["nom"].lower()))
         return {"nom": chemin_abs.name, "type": "dossier", "chemin": rel, "enfants": enfants}

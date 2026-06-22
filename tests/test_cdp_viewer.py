@@ -294,6 +294,28 @@ class TestServeur(unittest.TestCase):
         self.assertIn("/api/classes", html)
 
 
+class TestExclusionDotfiles(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.racine = Path(self.tmp.name)
+        (self.racine / "PCSI").mkdir()
+        (self.racine / "PCSI" / "cours.pdf").write_bytes(b"x")
+        (self.racine / "PCSI" / ".cdp-manifest.json").write_text("{}")
+        (self.racine / ".cache").mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_classes_ignorent_les_dotdirs(self):
+        self.assertEqual(cdp_viewer.lister_classes(self.racine), ["PCSI"])
+
+    def test_arbre_ignore_le_manifeste(self):
+        arbre = cdp_viewer.construire_arbre(self.racine, "PCSI")
+        noms = [e["nom"] for e in arbre["enfants"]]
+        self.assertIn("cours.pdf", noms)
+        self.assertNotIn(".cdp-manifest.json", noms)
+
+
 class TestVersionCLI(unittest.TestCase):
     """`cdp_viewer.py --version` affiche la version et quitte proprement."""
 
