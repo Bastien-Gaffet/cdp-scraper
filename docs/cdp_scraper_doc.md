@@ -54,6 +54,8 @@ python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --simulation
 | `--profondeur N` | int | illimité | Profondeur maximale de sous-dossiers explorés |
 | `--delai SECONDES` | float | 0 | Pause entre requêtes pour ménager le serveur |
 | `--sans-colles` | flag | non | Ne pas récupérer les programmes de colles |
+| `--complet` | flag | non | Ignorer le manifeste et tout re-télécharger (resynchro intégrale) |
+| `--reprise` | flag | non | Reprendre uniquement les téléchargements en échec, sans re-explorer |
 | `--accepter-conditions` | flag | non | Accepter les conditions d'usage sans invite (1er lancement) |
 | `--version` | flag | — | Afficher la version et quitter |
 

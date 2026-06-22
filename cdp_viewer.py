@@ -19,10 +19,13 @@ import sys
 import tokenize
 import urllib.parse
 import webbrowser
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-__version__ = "1.1.0"
+import cdp_manifeste
+
+__version__ = "1.2.0"
 
 PAGE_HTML = r"""<!doctype html>
 <html lang="fr">
@@ -104,6 +107,7 @@ const elRecherche = document.getElementById("recherche");
 
 let arbres = {};          // cache : nom de classe -> nœud racine
 let classesDispo = [];
+let fenetreRecents = 30;   // jours
 
 // Icônes SVG (suivent la couleur du texte, sans emoji).
 const ICONES = {
@@ -137,6 +141,18 @@ function octets(n) {
   if (n < 1024) return n + " o";
   if (n < 1048576) return (n/1024).toFixed(1) + " Ko";
   return (n/1048576).toFixed(1) + " Mo";
+}
+function dateCourte(iso) {            // "2026-06-22T..." -> "22 juin"
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return d.toLocaleDateString("fr-FR", {day: "numeric", month: "long"});
+}
+function joursDepuis(iso) {
+  if (!iso) return Infinity;
+  const d = new Date(iso);
+  if (isNaN(d)) return Infinity;
+  return (Date.now() - d.getTime()) / 86400000;
 }
 // Lien navigable : un dossier pointe vers un hash (#chemin), un document vers
 // une vraie URL /file/... (navigation réelle => retour via le navigateur).
@@ -188,8 +204,13 @@ function ligne(noeud) {
   nom.className = "nom"; nom.textContent = noeud.nom;
   const meta = document.createElement("span");
   meta.className = "meta";
-  meta.textContent = dossier ? "(" + nbElements(noeud) + ")"
-    : "(" + (noeud.ext ? noeud.ext.toUpperCase() + " · " : "") + octets(noeud.taille) + ")";
+  if (dossier) {
+    meta.textContent = "(" + nbElements(noeud) + ")";
+  } else {
+    const dt = dateCourte(noeud.date);
+    meta.textContent = "(" + (noeud.ext ? noeud.ext.toUpperCase() + " · " : "")
+                     + octets(noeud.taille) + (dt ? " · " + dt : "") + ")";
+  }
   a.appendChild(elIcone(dossier ? "dossier" : "document"));
   a.appendChild(nom); a.appendChild(meta);
   return a;
@@ -243,6 +264,13 @@ function rendreRubriques(arbre, cible) {
   accueil.appendChild(elIcone("accueil"));
   accueil.appendChild(document.createTextNode(" Accueil"));
   elRubriques.appendChild(accueil);
+  const recents = document.createElement("a");
+  const surRecents = cible && cible.__recents__;
+  recents.className = "rubrique" + (surRecents ? " actif" : "");
+  recents.href = hashDe(arbre.chemin + "/__recents__");
+  recents.appendChild(elIcone("document"));
+  recents.appendChild(document.createTextNode(" Récents"));
+  elRubriques.appendChild(recents);
   tri(arbre.enfants).filter(e => e.type === "dossier").forEach(d => {
     const r = document.createElement("a");
     r.className = "rubrique" + (d.nom === actifTop ? " actif" : "");
@@ -278,6 +306,37 @@ function rechercher(arbre, q) {
   elExplorateur.appendChild(liste);
 }
 
+// ── Vue « récemment ajoutés » (fenêtre glissante de N jours) ────────────────
+function rendreRecents(arbre) {
+  elExplorateur.innerHTML = "";
+  const barre = document.createElement("div");
+  barre.className = "fil";
+  barre.appendChild(document.createTextNode("Récemment ajoutés — "));
+  const sel = document.createElement("select");
+  [[7, "7 jours"], [30, "30 jours"], [90, "90 jours"]].forEach(([v, lib]) => {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = lib;
+    if (v === fenetreRecents) o.selected = true;
+    sel.appendChild(o);
+  });
+  sel.onchange = () => { fenetreRecents = +sel.value; rendreRecents(arbre); };
+  barre.appendChild(sel);
+  elExplorateur.appendChild(barre);
+
+  const recents = collecter(arbre, [])
+    .filter(f => joursDepuis(f.date_maj || f.date) <= fenetreRecents)
+    .sort((a, b) => new Date(b.date_maj || b.date) - new Date(a.date_maj || a.date));
+  if (!recents.length) {
+    const v = document.createElement("div"); v.className = "vide";
+    v.textContent = "Aucun ajout dans les " + fenetreRecents + " derniers jours.";
+    elExplorateur.appendChild(v);
+    return;
+  }
+  const liste = document.createElement("div"); liste.className = "liste";
+  recents.forEach(f => liste.appendChild(ligne(f)));
+  elExplorateur.appendChild(liste);
+}
+
 // ── Routage : le hash de l'URL porte le dossier courant ─────────────────────
 async function naviguer() {
   const hash = decodeURIComponent(location.hash.slice(1));
@@ -294,6 +353,11 @@ async function naviguer() {
   }
   if (elClasse.value !== classe) elClasse.value = classe;
   elRecherche.value = "";
+  if (hash.endsWith("/__recents__")) {
+    rendreRubriques(arbre, {__recents__: true, chemin: arbre.chemin});
+    rendreRecents(arbre);
+    return;
+  }
   const cible = trouver(arbre, hash) || arbre;
   rendreRubriques(arbre, cible);
   rendreListe(arbre, cible);
@@ -544,38 +608,76 @@ def lister_classes(racine: Path) -> list[str]:
     """Noms des sous-dossiers de `racine` (= les classes scrapées), triés."""
     if not racine.is_dir():
         return []
-    return sorted(p.name for p in racine.iterdir() if p.is_dir())
+    return sorted(p.name for p in racine.iterdir()
+                  if p.is_dir() and not p.name.startswith("."))
 
 
-def _noeud(racine: Path, chemin_abs: Path) -> dict:
-    """Construit récursivement le nœud (dossier ou fichier) pour `chemin_abs`."""
+def _noeud(racine: Path, chemin_abs: Path, dates: dict) -> dict:
+    """Construit récursivement le nœud (dossier ou fichier) pour `chemin_abs`.
+    `dates` : index {chemin_relatif_posix: {"ajout", "maj"}} issu du manifeste.
+
+    Chaque fichier porte `date` (date d'ajout, affichée) et `date_maj` (date du
+    dernier changement, utilisée par la vue « récemment ajoutés » pour qu'un
+    document mis à jour réapparaisse). À défaut de manifeste, les deux valent le
+    mtime du fichier."""
     rel = chemin_abs.relative_to(racine).as_posix()
     if chemin_abs.is_dir():
-        enfants = [_noeud(racine, p) for p in chemin_abs.iterdir()]
+        enfants = [_noeud(racine, p, dates) for p in chemin_abs.iterdir()
+                   if not p.name.startswith(".")]
         # Dossiers d'abord, puis tri alphabétique insensible à la casse.
         enfants.sort(key=lambda n: (n["type"] != "dossier", n["nom"].lower()))
         return {"nom": chemin_abs.name, "type": "dossier", "chemin": rel, "enfants": enfants}
     ext = chemin_abs.suffix.lstrip(".").lower()
+    info = dates.get(rel) or {}
+    date = info.get("ajout") or ""
+    date_maj = info.get("maj") or ""
+    if not date:
+        date = datetime.fromtimestamp(chemin_abs.stat().st_mtime).isoformat(timespec="seconds")
+    if not date_maj:
+        date_maj = date
     return {
         "nom": chemin_abs.name,
         "type": "fichier",
         "chemin": rel,
         "taille": chemin_abs.stat().st_size,
         "ext": ext,
+        "date": date,
+        "date_maj": date_maj,
     }
+
+
+def _index_dates(dossier_classe: Path, classe: str) -> dict:
+    """Index {chemin_relatif_posix: {"ajout": premiere_vue, "maj": derniere_maj}}
+    depuis le manifeste de la classe. Les chemins sont relatifs à la racine
+    (préfixés par le nom de classe), comme les `chemin` des nœuds."""
+    try:
+        manifeste = cdp_manifeste.charger(dossier_classe)
+    except cdp_manifeste.ManifesteVersionFuture:
+        return {}
+    index = {}
+    for e in manifeste.get("documents", {}).values():
+        nom = e.get("nom")
+        if not nom:
+            continue
+        chemin = e.get("chemin", "")
+        rel = f"{classe}/{chemin}/{nom}" if chemin else f"{classe}/{nom}"
+        ajout = e.get("premiere_vue", "")
+        index[rel] = {"ajout": ajout, "maj": e.get("derniere_maj") or ajout}
+    return index
 
 
 def construire_arbre(racine: Path, classe: str) -> dict | None:
     """Arbre de la classe `classe` sous `racine`, ou None si elle n'existe pas.
 
     Les `chemin` des nœuds sont relatifs à `racine` (ils incluent le dossier de
-    classe) et utilisables tels quels dans /file/<chemin>.
-    """
+    classe) et utilisables tels quels dans /file/<chemin>. Chaque fichier porte
+    une `date` (premiere_vue du manifeste, sinon mtime)."""
     racine = racine.resolve()
     base = resoudre_dans_racine(racine, classe)
     if base is None or not base.is_dir():
         return None
-    return _noeud(racine, base)
+    dates = _index_dates(base, classe)
+    return _noeud(racine, base, dates)
 
 
 # Extensions servies en text/plain pour s'afficher dans le navigateur plutôt

@@ -31,9 +31,10 @@ import getpass
 import argparse
 from pathlib import Path
 from datetime import datetime
+import cdp_manifeste
 from urllib.parse import urljoin, urlsplit, unquote
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
 
@@ -205,7 +206,7 @@ def analyser_page(html_page: str, url_page: str):
     Analyse une page docs et renvoie (sous_dossiers, documents).
 
       sous_dossiers : [{"url": abs, "nom": str}]
-      documents     : [{"url": abs, "id": str, "nom": str, "type": str}]
+      documents     : [{"url": abs, "id": str, "nom": str, "type": str, "empreinte": str}]
 
     On se limite au <section> (le contenu réel), ce qui ignore le menu de
     navigation. Le bloc « Documents récents » (noms contenant « / ») est
@@ -235,8 +236,10 @@ def analyser_page(html_page: str, url_page: str):
                 continue
             don_m = RE_DONNEES.search(bloc)
             type_ = ""
+            empreinte = ""
             if don_m:
-                type_ = don_m.group(1).split(",")[0].strip().lower()
+                empreinte = don_m.group(1).strip()
+                type_ = empreinte.split(",")[0].strip().lower()
             id_doc = id_m.group(1)
             # Pour audio/vidéo/py/sql, le bloc <p class="doc"> contient D'ABORD un
             # lien « icon-play » en download?id=N&voir (page lecteur HTML, ou
@@ -249,6 +252,7 @@ def analyser_page(html_page: str, url_page: str):
                 "id":   id_doc,
                 "nom":  nom or f"document_{id_doc}",
                 "type": type_,
+                "empreinte": empreinte,
             })
 
     return sous_dossiers, documents
@@ -409,7 +413,18 @@ def nom_fichier(resp: requests.Response, doc: dict) -> str:
     return nom_sur(nom)
 
 
+def _ecrire_atomique(cible: Path, donnees: bytes):
+    """Écrit `donnees` dans `cible` via un fichier .part puis renommage atomique."""
+    part = cible.with_name(cible.name + ".part")
+    part.write_bytes(donnees)
+    os.replace(part, cible)
+
+
 def telecharger(session, doc, dossier_base: Path, simulation: bool, i: int, total: int):
+    """Télécharge `doc` sous `dossier_base`. Écriture atomique (.part puis
+    renommage). Écrase toujours la cible (la décision de sauter est prise en
+    amont par la planification). Renvoie (statut, taille, nom_reel) où statut ∈
+    {ok, echec, simulation}."""
     chemin_rel = doc.get("chemin", "")
     dossier = dossier_base / chemin_rel if chemin_rel else dossier_base
     prefixe = f"[{i}/{total}]"
@@ -417,21 +432,22 @@ def telecharger(session, doc, dossier_base: Path, simulation: bool, i: int, tota
     # Contenu généré localement (programme de colles textuel) : pas de requête.
     if "contenu_html" in doc:
         donnees = doc["contenu_html"].encode("utf-8")
+        nom = nom_sur(doc["nom"])
         affiche = f"{chemin_rel + '/' if chemin_rel else ''}{doc['nom']}"
         if simulation:
             print(f"  {prefixe} {cyan('[SIM]')} {affiche}  {dim('(' + fmt_taille(len(donnees)) + ')')}")
-            return "simulation", len(donnees)
+            return "simulation", len(donnees), nom
         dossier.mkdir(parents=True, exist_ok=True)
-        (dossier / nom_sur(doc["nom"])).write_bytes(donnees)
+        _ecrire_atomique(dossier / nom, donnees)
         print(f"  {prefixe} {vert('[OK]')}  {affiche}  {dim('(' + fmt_taille(len(donnees)) + ')')}")
-        return "ok", len(donnees)
+        return "ok", len(donnees), nom
 
     try:
         resp = session.get(doc["url"], timeout=60, stream=True)
         resp.raise_for_status()
     except requests.RequestException as e:
         print(rouge(f"  {prefixe} [ERR] {doc['nom']} -> {e}"))
-        return "echec", 0
+        return "echec", 0, doc["nom"]
 
     nom = nom_fichier(resp, doc)
     affiche = f"{chemin_rel + '/' if chemin_rel else ''}{nom}"
@@ -440,28 +456,29 @@ def telecharger(session, doc, dossier_base: Path, simulation: bool, i: int, tota
         taille = int(resp.headers.get("Content-Length", 0))
         print(f"  {prefixe} {cyan('[SIM]')} {affiche}  {dim('(' + (fmt_taille(taille) if taille else '?') + ')')}")
         resp.close()
-        return "simulation", taille
+        return "simulation", taille, nom
 
     dossier.mkdir(parents=True, exist_ok=True)
     cible = dossier / nom
-    if cible.exists() and cible.stat().st_size > 0:
-        print(dim(f"  {prefixe} [DEJA] {affiche}"))
-        resp.close()
-        return "existe", cible.stat().st_size
-
+    part = cible.with_name(cible.name + ".part")
     taille = 0
     try:
-        with open(cible, "wb") as f:
+        with open(part, "wb") as f:
             for chunk in resp.iter_content(chunk_size=65536):
                 if chunk:
                     f.write(chunk)
                     taille += len(chunk)
+        os.replace(part, cible)
     except (requests.RequestException, OSError) as e:
+        try:
+            part.unlink(missing_ok=True)
+        except OSError:
+            pass
         print(rouge(f"  {prefixe} [ERR] {affiche} -> {e}"))
-        return "echec", 0
+        return "echec", 0, nom
 
     print(f"  {prefixe} {vert('[OK]')}  {affiche}  {dim('(' + fmt_taille(taille) + ')')}")
-    return "ok", taille
+    return "ok", taille, nom
 
 # ─── Mode interactif ─────────────────────────────────────────────────────────
 
@@ -589,8 +606,61 @@ Exemples :
                    help="Ne pas récupérer les programmes de colles")
     p.add_argument("--accepter-conditions", action="store_true",
                    help="Accepter les conditions d'usage sans invite (1er lancement)")
+    synchro = p.add_mutually_exclusive_group()
+    synchro.add_argument("--complet", action="store_true",
+                         help="Ignorer le manifeste et tout re-télécharger (resynchro intégrale)")
+    synchro.add_argument("--reprise", action="store_true",
+                         help="Reprendre uniquement les téléchargements en échec, sans re-explorer\n"
+                              "(les programmes de colles en texte ne sont pas concernés)")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
     return p.parse_args()
+
+
+def executer_reprise(session, dossier: Path, delai: float):
+    """Mode --reprise : retélécharge les seuls échecs/manquants listés au
+    manifeste, sans re-explorer l'arborescence."""
+    try:
+        manifeste = cdp_manifeste.charger(dossier)
+    except cdp_manifeste.ManifesteVersionFuture as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+    if not manifeste.get("documents"):
+        print(jaune("\nAucun manifeste à reprendre."))
+        print(jaune("Lancez d'abord une synchronisation normale."))
+        return
+
+    a_faire = cdp_manifeste.entrees_a_reprendre(manifeste, dossier)
+    if not a_faire:
+        print(vert("\nRien à reprendre : tout est à jour."))
+        return
+
+    a_faire.sort(key=lambda d: (d.get("chemin", ""), d["nom"]))
+    total = len(a_faire)
+    print(f"\nReprise de {gras(str(total))} téléchargement(s) en échec …\n")
+
+    repris = 0
+    for i, doc in enumerate(a_faire, 1):
+        statut, taille, nom = telecharger(session, doc, dossier, False, i, total)
+        erreur = "échec de téléchargement" if statut == "echec" else None
+        cdp_manifeste.maj_entree(manifeste, doc, statut, nom, taille,
+                                 datetime.now().isoformat(timespec="seconds"),
+                                 erreur=erreur)
+        if statut == "ok":
+            repris += 1
+        if delai:
+            time.sleep(delai)
+
+    manifeste["derniere_synchro"] = datetime.now().isoformat(timespec="seconds")
+    cdp_manifeste.enregistrer(dossier, manifeste)
+
+    persistants = total - repris
+    print()
+    print(gras("─── RÉSUMÉ " + "─" * 40))
+    print(f"  Repris            : {vert(str(repris))}")
+    if persistants:
+        print(f"  Échecs persistants : {rouge(str(persistants))}")
+    print()
 
 
 def main():
@@ -627,6 +697,13 @@ def main():
         sys.exit(1)
     print(vert("Connexion réussie."))
 
+    nom_classe = nom_sur(urlsplit(url).path.strip("/").split("/")[-1]) or "classe"
+    dossier = Path(sortie) / nom_classe
+
+    if args.reprise:
+        executer_reprise(session, dossier, args.delai)
+        return
+
     # ── Exploration ──────────────────────────────────────────────────────────
     prof = "illimitée" if args.profondeur is None else args.profondeur
     print(f"\nExploration des documents (profondeur {prof}) …")
@@ -649,43 +726,68 @@ def main():
         print(jaune("La classe n'a peut-être pas de documents accessibles avec ce compte."))
         sys.exit(0)
 
-    print(f"\n{gras(str(len(documents)))} document(s) trouvé(s).\n")
+    print(f"\n{gras(str(len(documents)))} document(s) trouvé(s).")
 
-    # ── Téléchargement ───────────────────────────────────────────────────────
-    # Tout est rangé dans un sous-dossier nommé d'après la classe.
-    nom_classe = nom_sur(urlsplit(url).path.strip("/").split("/")[-1]) or "classe"
-    dossier = Path(sortie) / nom_classe
+    # ── Planification (synchro incrémentale) ──────────────────────────────────
+    try:
+        manifeste = cdp_manifeste.charger(dossier)
+    except cdp_manifeste.ManifesteVersionFuture as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+    plan = cdp_manifeste.planifier(documents, manifeste, dossier, complet=args.complet)
+    a_faire = plan["nouveau"] + plan["modifie"] + plan["a_reprendre"]
+    a_faire.sort(key=lambda d: (d.get("chemin", ""), d["nom"]))
+
+    print(f"  {gras(str(len(plan['nouveau'])))} nouveau(x), "
+          f"{gras(str(len(plan['modifie'])))} mis à jour, "
+          f"{gras(str(len(plan['a_reprendre'])))} à reprendre, "
+          f"{dim(str(len(plan['a_jour'])) + ' à jour')}.\n")
+
     if not simulation:
         dossier.mkdir(parents=True, exist_ok=True)
         print(f"Destination : {gras(str(dossier.resolve()))}\n")
 
-    total = len(documents)
-    documents.sort(key=lambda d: (d.get("chemin", ""), d["nom"]))
-    compteur = {"ok": 0, "existe": 0, "echec": 0, "simulation": 0}
-    volume   = {"ok": 0, "existe": 0, "simulation": 0}
-    for i, doc in enumerate(documents, 1):
-        statut, taille = telecharger(session, doc, dossier, simulation, i, total)
+    total = len(a_faire)
+    compteur = {"ok": 0, "echec": 0, "simulation": 0}
+    volume = {"ok": 0, "simulation": 0}
+    for i, doc in enumerate(a_faire, 1):
+        statut, taille, nom = telecharger(session, doc, dossier, simulation, i, total)
         compteur[statut] = compteur.get(statut, 0) + 1
         if statut in volume:
             volume[statut] += taille
+        if not simulation:
+            erreur = "échec de téléchargement" if statut == "echec" else None
+            cdp_manifeste.maj_entree(manifeste, doc, statut, nom, taille,
+                                     datetime.now().isoformat(timespec="seconds"),
+                                     erreur=erreur)
         if not simulation and args.delai:
             time.sleep(args.delai)
+
+    # ── Manifeste : disparus + enregistrement (hors simulation) ───────────────
+    if not simulation:
+        cdp_manifeste.marquer_disparus(manifeste, plan["disparus"])
+        manifeste["version"] = cdp_manifeste.VERSION
+        manifeste["classe"] = nom_classe
+        manifeste["url"] = url
+        manifeste["derniere_synchro"] = datetime.now().isoformat(timespec="seconds")
+        cdp_manifeste.enregistrer(dossier, manifeste)
 
     # ── Résumé ───────────────────────────────────────────────────────────────
     print()
     print(gras("─── RÉSUMÉ " + "─" * 40))
     if simulation:
-        print(f"  Documents à télécharger : {gras(str(compteur['simulation']))}")
-        print(f"  Volume estimé           : {gras(fmt_taille(volume['simulation']))}")
+        print(f"  À télécharger : {gras(str(compteur['simulation']))}")
+        print(f"  Volume estimé : {gras(fmt_taille(volume['simulation']))}")
+        print(f"  À jour (ignorés) : {dim(str(len(plan['a_jour'])))}")
         print(jaune("  (mode simulation — relancez sans --simulation pour télécharger)"))
     else:
-        print(f"  Téléchargés   : {vert(str(compteur['ok']))}   ({fmt_taille(volume['ok'])})")
-        if compteur["existe"]:
-            print(f"  Déjà présents : {dim(str(compteur['existe']))}   ({fmt_taille(volume['existe'])})")
+        print(f"  Nouveaux / mis à jour : {vert(str(compteur['ok']))}   ({fmt_taille(volume['ok'])})")
+        print(f"  À jour (ignorés)      : {dim(str(len(plan['a_jour'])))}")
         if compteur["echec"]:
-            print(f"  Échecs        : {rouge(str(compteur['echec']))}")
-        total_disque = volume["ok"] + volume["existe"]
-        print(f"  Volume total  : {gras(fmt_taille(total_disque))}")
+            print(f"  Échecs                : {rouge(str(compteur['echec']))}   (relançables avec --reprise)")
+        if plan["disparus"]:
+            print(f"  Disparus du serveur   : {jaune(str(len(plan['disparus'])))}   (fichiers conservés)")
         print(f"\n  Fichiers dans : {cyan(str(dossier.resolve()))}")
     print()
 

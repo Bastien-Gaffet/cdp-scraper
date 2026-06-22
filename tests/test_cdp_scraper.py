@@ -1,5 +1,8 @@
 import unittest
 import sys
+import os
+import tempfile
+from unittest import mock
 from pathlib import Path
 
 # Les tests vivent dans tests/ ; on ajoute la racine du projet au sys.path pour
@@ -43,7 +46,7 @@ class TestVersion(unittest.TestCase):
         self.assertEqual(cdp_scraper.__version__, cdp_viewer.__version__)
 
     def test_version_attendue(self):
-        self.assertEqual(cdp_scraper.__version__, "1.1.0")
+        self.assertEqual(cdp_scraper.__version__, "1.2.0")
 
 
 class TestAnalyserPage(unittest.TestCase):
@@ -165,6 +168,124 @@ class TestAnalyserPage(unittest.TestCase):
         _, docs = cdp_scraper.analyser_page(page, self.URL)
         self.assertEqual(docs[0]["nom"], "Algèbre & Géométrie")
 
+    def test_empreinte_conserve_docdonnees(self):
+        page = (
+            '<section>'
+            '<p class="doc"><span class="docdonnees">(pdf, 1 jan, 100 ko)</span> '
+            '<a href="download?id=42&amp;v=abcde">'
+            '<span class="icone"></span><span class="nom">Cours 1</span></a></p>'
+            '</section>'
+        )
+        _, docs = cdp_scraper.analyser_page(page, self.URL)
+        self.assertEqual(docs[0]["empreinte"], "pdf, 1 jan, 100 ko")
+
+    def test_empreinte_vide_si_pas_de_docdonnees(self):
+        page = (
+            '<section>'
+            '<p class="doc">'
+            '<a href="download?id=7&amp;v=x">'
+            '<span class="nom">Sans donnees</span></a></p>'
+            '</section>'
+        )
+        _, docs = cdp_scraper.analyser_page(page, self.URL)
+        self.assertEqual(docs[0]["empreinte"], "")
+
+
+class _RespTelecharge:
+    """Réponse de téléchargement minimale pour telecharger (stream=True)."""
+
+    def __init__(self, contenu: bytes, headers=None):
+        self._contenu = contenu
+        self.headers = headers or {}
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, chunk_size=65536):
+        yield self._contenu
+
+    def close(self):
+        pass
+
+
+class _SessionTelecharge:
+    def __init__(self, contenu: bytes, headers=None):
+        self._resp = _RespTelecharge(contenu, headers)
+
+    def get(self, url, timeout=None, stream=False):
+        return self._resp
+
+
+class TestTelechargerAtomique(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_ecrit_le_fichier_et_renvoie_nom(self):
+        sess = _SessionTelecharge(b"PDFDATA")
+        doc = {"url": "https://x/download?id=1&dl", "id": "1",
+               "nom": "cours.pdf", "type": "pdf", "chemin": "Phys"}
+        statut, taille, nom = cdp_scraper.telecharger(sess, doc, self.base, False, 1, 1)
+        self.assertEqual(statut, "ok")
+        self.assertEqual(taille, 7)
+        self.assertEqual((self.base / "Phys" / nom).read_bytes(), b"PDFDATA")
+
+    def test_ecrase_un_fichier_existant(self):
+        (self.base / "Phys").mkdir(parents=True)
+        (self.base / "Phys" / "cours.pdf").write_bytes(b"VIEUX")
+        sess = _SessionTelecharge(b"NOUVEAU")
+        doc = {"url": "https://x/download?id=1&dl", "id": "1",
+               "nom": "cours.pdf", "type": "pdf", "chemin": "Phys"}
+        statut, _, nom = cdp_scraper.telecharger(sess, doc, self.base, False, 1, 1)
+        self.assertEqual(statut, "ok")
+        self.assertEqual((self.base / "Phys" / "cours.pdf").read_bytes(), b"NOUVEAU")
+
+    def test_pas_de_part_residuel_apres_succes(self):
+        sess = _SessionTelecharge(b"DATA")
+        doc = {"url": "https://x/download?id=1&dl", "id": "1",
+               "nom": "cours.pdf", "type": "pdf", "chemin": ""}
+        cdp_scraper.telecharger(sess, doc, self.base, False, 1, 1)
+        self.assertEqual(list(self.base.glob("*.part")), [])
+
+    def test_contenu_genere_ecrit_html(self):
+        doc = {"id": "pc_x", "nom": "Programme.html", "chemin": "Maths",
+               "contenu_html": "<p>colles</p>"}
+        statut, _, nom = cdp_scraper.telecharger(None, doc, self.base, False, 1, 1)
+        self.assertEqual(statut, "ok")
+        self.assertEqual(nom, "Programme.html")
+        self.assertTrue((self.base / "Maths" / "Programme.html").is_file())
+
+    def test_coupure_en_flux_echec_sans_fichier_ni_part(self):
+        # Une coupure réseau en plein téléchargement ne doit laisser ni fichier
+        # cible (tronqué) ni .part résiduel : statut "echec", rien sur le disque.
+        class _RespCoupe:
+            headers = {}
+
+            def raise_for_status(self):
+                pass
+
+            def iter_content(self, chunk_size=65536):
+                yield b"debut"
+                raise cdp_scraper.requests.ConnectionError("coupure")
+
+            def close(self):
+                pass
+
+        class _SessionCoupe:
+            def get(self, url, timeout=None, stream=False):
+                return _RespCoupe()
+
+        doc = {"url": "https://x/download?id=1&dl", "id": "1",
+               "nom": "cours.pdf", "type": "pdf", "chemin": "Phys"}
+        statut, taille, _ = cdp_scraper.telecharger(_SessionCoupe(), doc, self.base, False, 1, 1)
+        self.assertEqual(statut, "echec")
+        self.assertEqual(taille, 0)
+        self.assertFalse((self.base / "Phys" / "cours.pdf").exists())
+        self.assertEqual(list((self.base / "Phys").glob("*.part")), [])
+
 
 class TestProgcolles(unittest.TestCase):
     BASE = "https://cahier-de-prepa.fr/maclasse"
@@ -263,6 +384,26 @@ class TestUtilitaires(unittest.TestCase):
 
     def test_cle_rep_racine(self):
         self.assertEqual(cdp_scraper._cle_rep("https://x/docs"), "")
+
+
+class TestDrapeauxSynchro(unittest.TestCase):
+    def test_complet_et_reprise_exclusifs(self):
+        with mock.patch.object(sys, "argv",
+                               ["cdp_scraper.py", "--complet", "--reprise"]):
+            with self.assertRaises(SystemExit):
+                cdp_scraper.parse_args()
+
+    def test_complet_seul_ok(self):
+        with mock.patch.object(sys, "argv", ["cdp_scraper.py", "--complet"]):
+            args = cdp_scraper.parse_args()
+        self.assertTrue(args.complet)
+        self.assertFalse(args.reprise)
+
+    def test_reprise_seul_ok(self):
+        with mock.patch.object(sys, "argv", ["cdp_scraper.py", "--reprise"]):
+            args = cdp_scraper.parse_args()
+        self.assertTrue(args.reprise)
+        self.assertFalse(args.complet)
 
 
 if __name__ == "__main__":

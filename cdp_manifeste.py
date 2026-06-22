@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""cdp_manifeste — schéma et logique du manifeste de synchronisation.
+
+Module partagé par cdp_scraper (écrit) et cdp_viewer (lit). Aucune dépendance
+réseau : tout est testable hors-ligne. Le manifeste recense, par classe, les
+documents téléchargés et leur empreinte, pour ne re-télécharger que ce qui a
+changé (synchro incrémentale) et dater les fichiers dans le viewer.
+"""
+import json
+import hashlib
+import os
+from pathlib import Path
+
+VERSION = 1
+NOM_FICHIER = ".cdp-manifest.json"
+
+
+class ManifesteVersionFuture(Exception):
+    """Le manifeste a été écrit par une version plus récente de l'outil."""
+
+
+def _vide() -> dict:
+    return {"version": VERSION, "classe": "", "url": "",
+            "derniere_synchro": "", "documents": {}}
+
+
+def charger(dossier_classe: Path) -> dict:
+    """Lit le manifeste de `dossier_classe`. Renvoie un manifeste vide s'il est
+    absent ou illisible (JSON corrompu → on repart à neuf, jamais de perte de
+    fichiers). Lève ManifesteVersionFuture si la version dépasse VERSION."""
+    chemin = Path(dossier_classe) / NOM_FICHIER
+    if not chemin.is_file():
+        return _vide()
+    try:
+        donnees = json.loads(chemin.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        print(f"  [!] Manifeste illisible ({chemin}) : resynchronisation complète.")
+        return _vide()
+    if not isinstance(donnees, dict):
+        return _vide()
+    if donnees.get("version", 0) > VERSION:
+        raise ManifesteVersionFuture(
+            f"Manifeste en version {donnees.get('version')} > {VERSION} ; "
+            "mettez l'outil à jour.")
+    donnees.setdefault("documents", {})
+    return donnees
+
+
+def enregistrer(dossier_classe: Path, manifeste: dict) -> None:
+    """Écrit le manifeste de façon atomique (fichier .tmp + renommage)."""
+    dossier = Path(dossier_classe)
+    dossier.mkdir(parents=True, exist_ok=True)
+    cible = dossier / NOM_FICHIER
+    tmp = dossier / (NOM_FICHIER + ".tmp")
+    tmp.write_text(json.dumps(manifeste, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    os.replace(tmp, cible)
+
+
+def empreinte(doc: dict) -> str:
+    """Chaîne d'empreinte d'un document pour détecter un changement.
+
+    - contenu généré localement (contenu_html) → hash court "h:<sha>".
+    - document normal → chaîne docdonnees brute (champ "empreinte"), ou "".
+    """
+    contenu = doc.get("contenu_html")
+    if contenu is not None:
+        return "h:" + hashlib.sha256(contenu.encode("utf-8")).hexdigest()[:16]
+    return doc.get("empreinte", "") or ""
+
+
+def _present(dossier_classe: Path, entree: dict) -> bool:
+    """True si le fichier réel décrit par l'entrée existe sur le disque."""
+    nom = entree.get("nom")
+    if not nom:
+        return False
+    chemin = entree.get("chemin", "")
+    cible = Path(dossier_classe) / chemin / nom if chemin else Path(dossier_classe) / nom
+    return cible.is_file()
+
+
+def planifier(crawl: list, manifeste: dict, dossier_classe: Path,
+              complet: bool = False) -> dict:
+    """Range chaque document du crawl par comparaison avec le manifeste.
+
+    Renvoie {"nouveau", "modifie", "a_jour", "a_reprendre"} (listes de docs du
+    crawl) et "disparus" (ids du manifeste absents du crawl). `complet` force le
+    re-téléchargement de tout ce qui est connu.
+    """
+    docs = manifeste.get("documents", {})
+    plan = {"nouveau": [], "modifie": [], "a_jour": [], "a_reprendre": [],
+            "disparus": []}
+    vus = set()
+    for d in crawl:
+        ident = d["id"]
+        vus.add(ident)
+        entree = docs.get(ident)
+        if entree is None:
+            plan["nouveau"].append(d)
+            continue
+        if complet:
+            plan["modifie"].append(d)
+            continue
+        if entree.get("statut") != "ok" or not _present(dossier_classe, entree):
+            plan["a_reprendre"].append(d)
+            continue
+        emp_now = empreinte(d)
+        emp_old = entree.get("empreinte", "")
+        if emp_now and emp_old and emp_now != emp_old:
+            plan["modifie"].append(d)
+        else:
+            plan["a_jour"].append(d)
+    plan["disparus"] = [i for i in docs if i not in vus]
+    return plan
+
+
+def maj_entree(manifeste: dict, doc: dict, statut: str, nom: str,
+               taille: int, quand: str, erreur=None) -> None:
+    """Crée ou met à jour l'entrée du document `doc`. Pose `premiere_vue` au
+    premier ajout et la conserve ensuite ; `derniere_maj` à chaque appel."""
+    docs = manifeste.setdefault("documents", {})
+    entree = docs.get(doc["id"])
+    if entree is None:
+        entree = {"premiere_vue": quand}
+        docs[doc["id"]] = entree
+    entree.update({
+        "url": doc.get("url"),
+        "nom": nom,
+        "chemin": doc.get("chemin", ""),
+        "type": doc.get("type", ""),
+        "empreinte": empreinte(doc),
+        "taille": taille,
+        "statut": statut,
+        "derniere_maj": quand,
+        "erreur": erreur,
+    })
+
+
+def marquer_disparus(manifeste: dict, ids_disparus: list) -> None:
+    """Marque `statut=disparu` les entrées listées (fichiers conservés)."""
+    docs = manifeste.get("documents", {})
+    for ident in ids_disparus:
+        if ident in docs:
+            docs[ident]["statut"] = "disparu"
+
+
+def entrees_a_reprendre(manifeste: dict, dossier_classe: Path) -> list:
+    """Documents à reprendre (mode --reprise) : entrées en échec OU dont le
+    fichier manque, et qui ont une url (vrais téléchargements). Renvoie des docs
+    prêts pour telecharger (id, url, nom, chemin, type)."""
+    docs = []
+    for ident, e in manifeste.get("documents", {}).items():
+        if not e.get("url"):
+            continue
+        if e.get("statut") == "echec" or not _present(dossier_classe, e):
+            docs.append({"id": ident, "url": e["url"], "nom": e.get("nom", ""),
+                         "chemin": e.get("chemin", ""), "type": e.get("type", "")})
+    return docs

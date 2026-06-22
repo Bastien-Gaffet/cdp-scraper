@@ -98,6 +98,26 @@ python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --simulation
 Les documents sont rangés dans `<dossier>/<nom-de-la-classe>/`, en respectant
 l'arborescence exacte du site.
 
+### 🔄 Synchronisation intelligente
+
+Relancer `cdp_scraper.py` sur une classe déjà téléchargée ne retélécharge que
+les documents **nouveaux ou modifiés** : la synchronisation est **incrémentale**
+par défaut, sans requête superflue. Un manifeste `.cdp-manifest.json` est tenu à
+jour dans le dossier de chaque classe pour suivre l'état des fichiers.
+
+```bash
+python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe -s ./cours --complet
+python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe -s ./cours --reprise
+```
+
+- `--complet` : ignore le manifeste et **retélécharge tout** (resynchronisation
+  complète).
+- `--reprise` : retente uniquement les téléchargements en échec, **sans
+  réexplorer** l'arborescence.
+
+Dans le visualiseur, chaque fichier affiche sa **date d'ajout** et une vue
+**« Récemment ajoutés »** regroupe les documents récents (7 / 30 / 90 jours).
+
 📖 **Documentation complète** (tous les arguments, fonctionnement du crawl,
 programmes de colles, mode simulation) : [docs/cdp_scraper_doc.md](docs/cdp_scraper_doc.md).
 
