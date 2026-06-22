@@ -205,7 +205,7 @@ def analyser_page(html_page: str, url_page: str):
     Analyse une page docs et renvoie (sous_dossiers, documents).
 
       sous_dossiers : [{"url": abs, "nom": str}]
-      documents     : [{"url": abs, "id": str, "nom": str, "type": str}]
+      documents     : [{"url": abs, "id": str, "nom": str, "type": str, "empreinte": str}]
 
     On se limite au <section> (le contenu réel), ce qui ignore le menu de
     navigation. Le bloc « Documents récents » (noms contenant « / ») est
@@ -235,8 +235,10 @@ def analyser_page(html_page: str, url_page: str):
                 continue
             don_m = RE_DONNEES.search(bloc)
             type_ = ""
+            empreinte = ""
             if don_m:
-                type_ = don_m.group(1).split(",")[0].strip().lower()
+                empreinte = don_m.group(1).strip()
+                type_ = empreinte.split(",")[0].strip().lower()
             id_doc = id_m.group(1)
             # Pour audio/vidéo/py/sql, le bloc <p class="doc"> contient D'ABORD un
             # lien « icon-play » en download?id=N&voir (page lecteur HTML, ou
@@ -249,6 +251,7 @@ def analyser_page(html_page: str, url_page: str):
                 "id":   id_doc,
                 "nom":  nom or f"document_{id_doc}",
                 "type": type_,
+                "empreinte": empreinte,
             })
 
     return sous_dossiers, documents

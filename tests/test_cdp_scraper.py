@@ -165,6 +165,28 @@ class TestAnalyserPage(unittest.TestCase):
         _, docs = cdp_scraper.analyser_page(page, self.URL)
         self.assertEqual(docs[0]["nom"], "Algèbre & Géométrie")
 
+    def test_empreinte_conserve_docdonnees(self):
+        page = (
+            '<section>'
+            '<p class="doc"><span class="docdonnees">(pdf, 1 jan, 100 ko)</span> '
+            '<a href="download?id=42&amp;v=abcde">'
+            '<span class="icone"></span><span class="nom">Cours 1</span></a></p>'
+            '</section>'
+        )
+        _, docs = cdp_scraper.analyser_page(page, self.URL)
+        self.assertEqual(docs[0]["empreinte"], "pdf, 1 jan, 100 ko")
+
+    def test_empreinte_vide_si_pas_de_docdonnees(self):
+        page = (
+            '<section>'
+            '<p class="doc">'
+            '<a href="download?id=7&amp;v=x">'
+            '<span class="nom">Sans donnees</span></a></p>'
+            '</section>'
+        )
+        _, docs = cdp_scraper.analyser_page(page, self.URL)
+        self.assertEqual(docs[0]["empreinte"], "")
+
 
 class TestProgcolles(unittest.TestCase):
     BASE = "https://cahier-de-prepa.fr/maclasse"
