@@ -81,6 +81,20 @@ def retirer(config: dict, nom: str) -> dict:
     return config
 
 
+def chemin_config(override=None) -> Path:
+    """Résolution en cascade du fichier de config :
+    1) `override` (flag --config) ;
+    2) ./.cdp-scraper/config.json s'il existe (usage script, dossier courant) ;
+    3) ~/.cdp-scraper/config.json (HOME — défaut lecture/écriture, prêt pour l'exe).
+    """
+    if override:
+        return Path(override)
+    local = Path.cwd() / DOSSIER / NOM_FICHIER
+    if local.is_file():
+        return local
+    return Path.home() / DOSSIER / NOM_FICHIER
+
+
 def selectionner(config: dict, noms: list) -> list:
     """Renvoie les entrées correspondant à `noms`, dans cet ordre. Lève
     ClasseInconnue (en listant les noms disponibles) si l'une manque."""

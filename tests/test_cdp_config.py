@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 import sys
 import json
 import tempfile
@@ -105,6 +106,37 @@ class TestSelectionner(unittest.TestCase):
         c = self._config()
         with self.assertRaises(cdp_config.ClasseInconnue):
             cdp_config.selectionner(c, ["mpsi", "terminale"])
+
+
+class TestCheminConfig(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_override_prioritaire(self):
+        p = cdp_config.chemin_config("ailleurs/x.json")
+        self.assertEqual(p, Path("ailleurs/x.json"))
+
+    def test_local_existant_prioritaire_sur_home(self):
+        cwd = self.base / "projet"
+        (cwd / cdp_config.DOSSIER).mkdir(parents=True)
+        (cwd / cdp_config.DOSSIER / cdp_config.NOM_FICHIER).write_text("{}", encoding="utf-8")
+        with mock.patch.object(cdp_config.Path, "cwd", return_value=cwd), \
+             mock.patch.object(cdp_config.Path, "home", return_value=self.base / "home"):
+            p = cdp_config.chemin_config()
+        self.assertEqual(p, cwd / cdp_config.DOSSIER / cdp_config.NOM_FICHIER)
+
+    def test_sans_local_retombe_sur_home(self):
+        cwd = self.base / "projet"
+        cwd.mkdir(parents=True)
+        home = self.base / "home"
+        with mock.patch.object(cdp_config.Path, "cwd", return_value=cwd), \
+             mock.patch.object(cdp_config.Path, "home", return_value=home):
+            p = cdp_config.chemin_config()
+        self.assertEqual(p, home / cdp_config.DOSSIER / cdp_config.NOM_FICHIER)
 
 
 if __name__ == "__main__":
