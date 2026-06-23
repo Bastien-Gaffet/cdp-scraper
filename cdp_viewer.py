@@ -536,6 +536,60 @@ btn.onclick = async () => {
 </html>"""
 
 
+PAGE_ERREUR = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Erreur __CODE__ — cdp-viewer</title>
+<style>
+:root{--bg:#f7f7f8;--txt:#1d1d1f;--muted:#6b6b70;--accent:#2563eb}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#16171a;--txt:#e7e7ea;--muted:#9a9aa2;--accent:#6ea0ff}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:6px;text-align:center;padding:24px;
+  font:14px/1.5 system-ui,sans-serif;color:var(--txt);background:var(--bg)}
+.code{font-size:64px;font-weight:700;line-height:1;color:var(--accent)}
+h1{font-size:20px;margin:8px 0 0}
+p{color:var(--muted);max-width:34rem;margin:4px 0 16px}
+a{display:inline-block;padding:8px 16px;border-radius:8px;text-decoration:none;
+  border:1px solid var(--accent);color:var(--accent)}
+a:hover{background:var(--accent);color:#fff}
+</style>
+</head>
+<body>
+<div class="code">__CODE__</div>
+<h1>__TITRE__</h1>
+<p>__MESSAGE__</p>
+<a href="/">Retour à l'accueil</a>
+</body>
+</html>"""
+
+MESSAGES_ERREUR = {
+    "classe": ("Classe introuvable",
+               "Cette classe n'existe pas ou n'a pas encore été téléchargée. "
+               "Lancez cdp_scraper.py pour la récupérer."),
+    "fichier": ("Fichier introuvable",
+                "Ce fichier n'existe plus — il a peut-être été supprimé ou "
+                "renommé depuis la dernière synchronisation."),
+    "acces": ("Accès refusé",
+              "Ce chemin sort du dossier des cours autorisé."),
+    "introuvable": ("Page introuvable",
+                    "Cette adresse ne correspond à aucune page du viewer."),
+}
+
+
+def page_erreur(code: int, contexte: str) -> bytes:
+    """HTML d'erreur thémé (clair/sombre via prefers-color-scheme)."""
+    titre, message = MESSAGES_ERREUR.get(contexte, ("Erreur", contexte))
+    page = (PAGE_ERREUR
+            .replace("__CODE__", str(code))
+            .replace("__TITRE__", html.escape(titre))
+            .replace("__MESSAGE__", html.escape(message)))
+    return page.encode("utf-8")
+
+
 # Types de jetons colorisés comme chaîne (inclut les f-strings de Python 3.12+).
 _JETONS_STR = {tokenize.STRING}
 for _n in ("FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END"):
@@ -859,8 +913,9 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
         self._envoyer_octets(code, json.dumps(donnees).encode("utf-8"),
                              "application/json; charset=utf-8", cache=False)
 
-    def _erreur(self, code: int, message: str):
-        self._envoyer_octets(code, message.encode("utf-8"), "text/plain; charset=utf-8")
+    def _erreur(self, code: int, contexte: str):
+        self._envoyer_octets(code, page_erreur(code, contexte),
+                             "text/html; charset=utf-8", cache=False)
 
     def do_GET(self):
         parties = urllib.parse.urlparse(self.path)
@@ -881,7 +936,7 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             classe = (params.get("classe") or [""])[0]
             arbre = construire_arbre(racine, classe)
             if arbre is None:
-                self._erreur(404, "Classe introuvable")
+                self._erreur(404, "classe")
                 return
             self._envoyer_json(200, arbre)
             return
@@ -890,10 +945,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/ouvrir/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.is_file():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
             page = (PAGE_GGB
@@ -908,10 +963,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/code/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.is_file():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             source = cible.read_text(encoding="utf-8", errors="replace")
             corps = colorier_python(source)
@@ -933,10 +988,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/lancer/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.is_file():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             try:
                 info = lancer_python(cible)
@@ -950,10 +1005,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/file/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.is_file():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             ext = cible.suffix.lstrip(".").lower()
             if ext in EXT_TEXTE:
@@ -967,10 +1022,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/reveal/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.exists():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             try:
                 ouvrir_ou_reveler(cible)
@@ -980,7 +1035,7 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        self._erreur(404, "Introuvable")
+        self._erreur(404, "introuvable")
 
     def log_message(self, *args):  # silence: pas de log par requête
         pass
