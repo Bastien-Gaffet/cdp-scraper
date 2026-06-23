@@ -685,7 +685,11 @@ def main():
 
     simulation = args.simulation
     if interactif and not simulation:
-        simulation = demander_oui_non("Mode simulation (ne rien télécharger) ?", defaut=False)
+        # Formulé en « télécharger ? » (plus intuitif que « mode simulation ? ») :
+        # O / Entrée = télécharger, N = simulation (ne rien télécharger).
+        simulation = not demander_oui_non(
+            "Télécharger les fichiers maintenant ? (« non » = simulation, ne rien écrire)",
+            defaut=True)
 
     # ── Connexion ────────────────────────────────────────────────────────────
     print(f"\nConnexion à {cyan(url)} …")
