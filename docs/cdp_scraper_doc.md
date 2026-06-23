@@ -56,6 +56,11 @@ python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --simulation
 | `--sans-colles` | flag | non | Ne pas récupérer les programmes de colles |
 | `--complet` | flag | non | Ignorer le manifeste et tout re-télécharger (resynchro intégrale) |
 | `--reprise` | flag | non | Reprendre uniquement les téléchargements en échec, sans re-explorer |
+| `CLASSE...` | string | *(menu / toutes)* | Noms de classes mémorisées à traiter (menu interactif si aucun) |
+| `--config CHEMIN` | string | *(cascade)* | Fichier de config (défaut : `./.cdp-scraper/config.json` puis `~/.cdp-scraper/config.json`) |
+| `--tout` | flag | non | Traiter toutes les classes mémorisées, sans menu |
+| `--config-lister` | flag | non | Afficher les classes mémorisées puis quitter |
+| `--config-supprimer NOM` | flag | non | Retirer une classe de la config puis quitter |
 | `--accepter-conditions` | flag | non | Accepter les conditions d'usage sans invite (1er lancement) |
 | `--version` | flag | — | Afficher la version et quitter |
 
