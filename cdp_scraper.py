@@ -801,6 +801,86 @@ def traiter_classe(cfg: dict, args, mdp: str, simulation: bool) -> dict:
     return {"nom": nom_classe, "ok": True, "compteur": compteur, "volume": volume}
 
 
+def menu_selection(classes: list) -> list:
+    """Affiche la liste numérotée des classes et renvoie celles choisies."""
+    print("\nClasses mémorisées :")
+    for i, c in enumerate(classes, 1):
+        print(f"  {i}. {gras(c['nom'])}  {dim(c.get('url', ''))}")
+    saisie = input("\nLesquelles traiter ? (ex. « 1,3 », « tout », Entrée = tout) : ")
+    return [classes[i] for i in _indices_menu(saisie, len(classes))]
+
+
+def afficher_config(config: dict):
+    classes = cdp_config.lister(config)
+    if not classes:
+        print(jaune("\nAucune classe mémorisée."))
+        return
+    print(gras(f"\n{len(classes)} classe(s) mémorisée(s) :\n"))
+    for c in classes:
+        print(f"  • {gras(c['nom'])}")
+        print(f"      url     : {c.get('url', '')}")
+        print(f"      login   : {c.get('login', '')}")
+        print(f"      dossier : {c.get('dossier', '')}")
+    print()
+
+
+def afficher_resume_global(resumes: list):
+    """Résumé agrégé d'un run multi-classes (rien si une seule classe : son
+    résumé a déjà été affiché)."""
+    if len(resumes) <= 1:
+        return
+    print()
+    print(gras("═══ RÉSUMÉ GLOBAL " + "═" * 33))
+    total_ok = total_echec = 0
+    for r in resumes:
+        c = r.get("compteur", {})
+        ok = c.get("ok", 0)
+        echec = c.get("echec", 0)
+        total_ok += ok
+        total_echec += echec
+        etat = vert("OK") if r.get("ok") else rouge("connexion échouée")
+        ligne = f"  {gras(r['nom'])} : {ok} téléchargé(s)"
+        if echec:
+            ligne += f", {rouge(str(echec))} échec(s)"
+        print(f"{ligne}   [{etat}]")
+    suffixe = f", {rouge(str(total_echec))} échec(s)" if total_echec else ""
+    print(f"\n  Total : {vert(str(total_ok))} téléchargé(s){suffixe}.")
+    print()
+
+
+def run_classe_unique(args, config, chemin_cfg):
+    """Mode mono-classe : --url fourni OU config vide (interactif). Complète au
+    clavier ce qui manque, traite la classe, puis propose de la mémoriser."""
+    interactif = not args.url
+    if interactif:
+        print("Mode interactif — répondez aux questions (Entrée = valeur par défaut).\n")
+    url = normaliser_url(args.url) if args.url else normaliser_url(
+              demander("URL de la classe", defaut="https://cahier-de-prepa.fr/"))
+    login = args.login or demander("Identifiant / email")
+    mdp = args.mdp or demander("Mot de passe", secret=True)
+    sortie = args.sortie or (demander("Dossier de destination", defaut="cours_cdp")
+                             if interactif else "cours_cdp")
+
+    simulation = args.simulation
+    if interactif and not simulation:
+        simulation = not demander_oui_non(
+            "Télécharger les fichiers maintenant ? (« non » = simulation, ne rien écrire)",
+            defaut=True)
+
+    nom = nom_sur(urlsplit(url).path.strip("/").split("/")[-1]) or "classe"
+    cfg = {"nom": nom, "url": url, "login": login, "dossier": sortie}
+    resume = traiter_classe(cfg, args, mdp, simulation)
+
+    if (resume.get("ok") and not args.reprise and interactif
+            and not cdp_config.contient(config, nom)):
+        if demander_oui_non(
+                f"Mémoriser la classe « {nom} » dans la config ? (jamais le mot de passe)",
+                defaut=True):
+            cdp_config.ajouter_ou_maj(config, cfg)
+            cdp_config.enregistrer(chemin_cfg, config)
+            print(vert(f"Classe « {nom} » mémorisée dans {chemin_cfg}."))
+
+
 def main():
     args = parse_args()
 
@@ -809,129 +889,52 @@ def main():
     # Conditions d'usage (affichées + acceptées une seule fois).
     verifier_accord(args.accepter_conditions)
 
-    # Mode interactif si l'essentiel manque : on complète au clavier.
-    interactif = not args.url
-    if interactif:
-        print("Mode interactif — répondez aux questions (Entrée = valeur par défaut).\n")
-
-    url    = normaliser_url(args.url) if args.url else normaliser_url(
-                 demander("URL de la classe", defaut="https://cahier-de-prepa.fr/"))
-    login  = args.login or demander("Identifiant / email")
-    mdp    = args.mdp   or demander("Mot de passe", secret=True)
-    sortie = args.sortie or (demander("Dossier de destination", defaut="cours_cdp")
-                             if interactif else "cours_cdp")
-
-    simulation = args.simulation
-    if interactif and not simulation:
-        # Formulé en « télécharger ? » (plus intuitif que « mode simulation ? ») :
-        # O / Entrée = télécharger, N = simulation (ne rien télécharger).
-        simulation = not demander_oui_non(
-            "Télécharger les fichiers maintenant ? (« non » = simulation, ne rien écrire)",
-            defaut=True)
-
-    # ── Connexion ────────────────────────────────────────────────────────────
-    print(f"\nConnexion à {cyan(url)} …")
-    session = creer_session()
-    ok, message = connexion(session, url, login, mdp)
-    if not ok:
-        print(rouge(f"Connexion échouée : {message}"))
-        print(jaune("Vérifiez l'URL de la classe, l'identifiant et le mot de passe."))
-        sys.exit(1)
-    print(vert("Connexion réussie."))
-
-    nom_classe = nom_sur(urlsplit(url).path.strip("/").split("/")[-1]) or "classe"
-    dossier = Path(sortie) / nom_classe
-
-    if args.reprise:
-        executer_reprise(session, dossier, args.delai)
-        return
-
-    # ── Exploration ──────────────────────────────────────────────────────────
-    prof = "illimitée" if args.profondeur is None else args.profondeur
-    print(f"\nExploration des documents (profondeur {prof}) …")
-    documents = crawler(session, url, args.profondeur, args.delai)
-
-    if not args.sans_colles:
-        colles = crawler_progcolles(session, url)
-        if colles:
-            fusion = {d["id"]: d for d in documents}
-            ajoutes = 0
-            for d in colles:
-                if d["id"] not in fusion:
-                    fusion[d["id"]] = d
-                    ajoutes += 1
-            documents = list(fusion.values())
-            print(dim(f"  + {ajoutes} élément(s) de programmes de colles"))
-
-    if not documents:
-        print(jaune("\nAucun document trouvé."))
-        print(jaune("La classe n'a peut-être pas de documents accessibles avec ce compte."))
-        sys.exit(0)
-
-    print(f"\n{gras(str(len(documents)))} document(s) trouvé(s).")
-
-    # ── Planification (synchro incrémentale) ──────────────────────────────────
+    chemin_cfg = cdp_config.chemin_config(args.config)
     try:
-        manifeste = cdp_manifeste.charger(dossier)
-    except cdp_manifeste.ManifesteVersionFuture as e:
+        config = cdp_config.charger(chemin_cfg)
+    except cdp_config.ConfigVersionFuture as e:
         print(rouge(f"\n{e}"))
         sys.exit(1)
 
-    plan = cdp_manifeste.planifier(documents, manifeste, dossier, complet=args.complet)
-    a_faire = plan["nouveau"] + plan["modifie"] + plan["a_reprendre"]
-    a_faire.sort(key=lambda d: (d.get("chemin", ""), d["nom"]))
+    # Commandes de gestion : exécutées puis sortie immédiate.
+    if args.config_lister:
+        afficher_config(config)
+        return
+    if args.config_supprimer:
+        if not cdp_config.contient(config, args.config_supprimer):
+            print(jaune(f"\nClasse « {args.config_supprimer} » absente de la config."))
+            return
+        cdp_config.retirer(config, args.config_supprimer)
+        cdp_config.enregistrer(chemin_cfg, config)
+        print(vert(f"\nClasse « {args.config_supprimer} » retirée de la config."))
+        return
 
-    print(f"  {gras(str(len(plan['nouveau'])))} nouveau(x), "
-          f"{gras(str(len(plan['modifie'])))} mis à jour, "
-          f"{gras(str(len(plan['a_reprendre'])))} à reprendre, "
-          f"{dim(str(len(plan['a_jour'])) + ' à jour')}.\n")
+    # Mono-classe : --url explicite, ou config vide → interactif mono-classe.
+    if args.url or not cdp_config.lister(config):
+        run_classe_unique(args, config, chemin_cfg)
+        return
 
-    if not simulation:
-        dossier.mkdir(parents=True, exist_ok=True)
-        print(f"Destination : {gras(str(dossier.resolve()))}\n")
+    # Multi-classes piloté par la config.
+    try:
+        if args.noms:
+            choisies = cdp_config.selectionner(config, args.noms)
+        elif args.tout:
+            choisies = cdp_config.lister(config)
+        else:
+            choisies = menu_selection(cdp_config.lister(config))
+    except cdp_config.ClasseInconnue as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
 
-    total = len(a_faire)
-    compteur = {"ok": 0, "echec": 0, "simulation": 0}
-    volume = {"ok": 0, "simulation": 0}
-    for i, doc in enumerate(a_faire, 1):
-        statut, taille, nom = telecharger(session, doc, dossier, simulation, i, total)
-        compteur[statut] = compteur.get(statut, 0) + 1
-        if statut in volume:
-            volume[statut] += taille
-        if not simulation:
-            erreur = "échec de téléchargement" if statut == "echec" else None
-            cdp_manifeste.maj_entree(manifeste, doc, statut, nom, taille,
-                                     datetime.now().isoformat(timespec="seconds"),
-                                     erreur=erreur)
-        if not simulation and args.delai:
-            time.sleep(args.delai)
+    if not choisies:
+        print(jaune("\nAucune classe sélectionnée."))
+        return
 
-    # ── Manifeste : disparus + enregistrement (hors simulation) ───────────────
-    if not simulation:
-        cdp_manifeste.marquer_disparus(manifeste, plan["disparus"])
-        manifeste["version"] = cdp_manifeste.VERSION
-        manifeste["classe"] = nom_classe
-        manifeste["url"] = url
-        manifeste["derniere_synchro"] = datetime.now().isoformat(timespec="seconds")
-        cdp_manifeste.enregistrer(dossier, manifeste)
-
-    # ── Résumé ───────────────────────────────────────────────────────────────
-    print()
-    print(gras("─── RÉSUMÉ " + "─" * 40))
-    if simulation:
-        print(f"  À télécharger : {gras(str(compteur['simulation']))}")
-        print(f"  Volume estimé : {gras(fmt_taille(volume['simulation']))}")
-        print(f"  À jour (ignorés) : {dim(str(len(plan['a_jour'])))}")
-        print(jaune("  (mode simulation — relancez sans --simulation pour télécharger)"))
-    else:
-        print(f"  Nouveaux / mis à jour : {vert(str(compteur['ok']))}   ({fmt_taille(volume['ok'])})")
-        print(f"  À jour (ignorés)      : {dim(str(len(plan['a_jour'])))}")
-        if compteur["echec"]:
-            print(f"  Échecs                : {rouge(str(compteur['echec']))}   (relançables avec --reprise)")
-        if plan["disparus"]:
-            print(f"  Disparus du serveur   : {jaune(str(len(plan['disparus'])))}   (fichiers conservés)")
-        print(f"\n  Fichiers dans : {cyan(str(dossier.resolve()))}")
-    print()
+    resumes = []
+    for cfg in choisies:
+        mdp = args.mdp or demander(f"Mot de passe pour « {cfg['nom']} »", secret=True)
+        resumes.append(traiter_classe(cfg, args, mdp, args.simulation))
+    afficher_resume_global(resumes)
 
 
 if __name__ == "__main__":
