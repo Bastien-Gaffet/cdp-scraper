@@ -758,7 +758,7 @@ def traiter_classe(cfg: dict, args, mdp: str, simulation: bool) -> dict:
         manifeste = cdp_manifeste.charger(dossier)
     except cdp_manifeste.ManifesteVersionFuture as e:
         print(rouge(f"\n{e}"))
-        sys.exit(1)
+        return {"nom": nom_classe, "ok": False, "compteur": {}, "volume": {}}
 
     plan = cdp_manifeste.planifier(documents, manifeste, dossier, complet=args.complet)
     a_faire = plan["nouveau"] + plan["modifie"] + plan["a_reprendre"]

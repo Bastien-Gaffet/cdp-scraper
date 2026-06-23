@@ -480,6 +480,18 @@ class TestTraiterClasse(unittest.TestCase):
         tele.assert_called_once()
         self.assertEqual(list(Path(self.dossier).glob("**/.cdp-manifest.json")), [])
 
+    def test_manifeste_version_future_resume_ko_sans_exit(self):
+        cfg = {"nom": "mpsi", "url": "https://x/mpsi", "login": "a", "dossier": self.dossier}
+        doc = {"id": "1", "nom": "a.pdf", "url": "u", "chemin": "", "type": "pdf"}
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(True, "ok")), \
+             mock.patch.object(cdp_scraper, "crawler", return_value=[doc]), \
+             mock.patch.object(cdp_scraper.cdp_manifeste, "charger",
+                               side_effect=cdp_scraper.cdp_manifeste.ManifesteVersionFuture("trop récent")):
+            resume = cdp_scraper.traiter_classe(cfg, self._args(), "secret", True)
+        self.assertFalse(resume["ok"])
+        self.assertEqual(resume["nom"], "mpsi")
+
 
 class TestMainSelection(unittest.TestCase):
     def setUp(self):
