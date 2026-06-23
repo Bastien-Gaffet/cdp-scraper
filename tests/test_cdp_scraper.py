@@ -481,5 +481,43 @@ class TestTraiterClasse(unittest.TestCase):
         self.assertEqual(list(Path(self.dossier).glob("**/.cdp-manifest.json")), [])
 
 
+class TestMainSelection(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin = Path(self.tmp.name) / "config.json"
+        import cdp_config
+        c = cdp_config._vide()
+        for n in ("mpsi", "pcsi"):
+            c["classes"].append({"nom": n, "url": f"https://x/{n}",
+                                 "login": "l", "dossier": "cours_cdp"})
+        cdp_config.enregistrer(self.chemin, c)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, argv, traites):
+        def faux_traiter(cfg, args, mdp, simulation):
+            traites.append(cfg["nom"])
+            return {"nom": cfg["nom"], "ok": True, "compteur": {"ok": 1, "echec": 0}, "volume": {}}
+        with mock.patch.object(cdp_scraper, "parse_args",
+                               return_value=cdp_scraper.parse_args(argv)), \
+             mock.patch.object(cdp_scraper, "verifier_accord"), \
+             mock.patch.object(cdp_scraper.cdp_config, "chemin_config",
+                               return_value=self.chemin), \
+             mock.patch.object(cdp_scraper, "demander", return_value="motdepasse"), \
+             mock.patch.object(cdp_scraper, "traiter_classe", side_effect=faux_traiter):
+            cdp_scraper.main()
+
+    def test_noms_filtrent(self):
+        traites = []
+        self._run(["pcsi"], traites)
+        self.assertEqual(traites, ["pcsi"])
+
+    def test_tout_traite_toutes(self):
+        traites = []
+        self._run(["--tout"], traites)
+        self.assertEqual(sorted(traites), ["mpsi", "pcsi"])
+
+
 if __name__ == "__main__":
     unittest.main()
