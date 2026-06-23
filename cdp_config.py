@@ -55,3 +55,27 @@ def enregistrer(chemin: Path, config: dict) -> None:
     tmp.write_text(json.dumps(config, ensure_ascii=False, indent=2),
                    encoding="utf-8")
     os.replace(tmp, chemin)
+
+
+def contient(config: dict, nom: str) -> bool:
+    return any(c.get("nom") == nom for c in config.get("classes", []))
+
+
+def ajouter_ou_maj(config: dict, classe: dict) -> dict:
+    """Insère `classe` ou remplace l'entrée de même `nom`. Renvoie la config."""
+    classes = config.setdefault("classes", [])
+    for i, c in enumerate(classes):
+        if c.get("nom") == classe.get("nom"):
+            classes[i] = {**c, **classe}
+            return config
+    classes.append(classe)
+    return config
+
+
+def lister(config: dict) -> list:
+    return list(config.get("classes", []))
+
+
+def retirer(config: dict, nom: str) -> dict:
+    config["classes"] = [c for c in config.get("classes", []) if c.get("nom") != nom]
+    return config

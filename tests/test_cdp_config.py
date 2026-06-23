@@ -52,5 +52,42 @@ class TestChargerEnregistrer(unittest.TestCase):
         self.assertTrue(cible.is_file())
 
 
+class TestMutations(unittest.TestCase):
+    def _config(self):
+        c = cdp_config._vide()
+        c["classes"].append({"nom": "mpsi", "url": "u1", "login": "l1", "dossier": "d"})
+        return c
+
+    def test_ajouter_nouvelle(self):
+        c = cdp_config._vide()
+        cdp_config.ajouter_ou_maj(c, {"nom": "pcsi", "url": "u", "login": "l", "dossier": "d"})
+        self.assertEqual([x["nom"] for x in c["classes"]], ["pcsi"])
+
+    def test_maj_existante_remplace_sans_doublon(self):
+        c = self._config()
+        cdp_config.ajouter_ou_maj(c, {"nom": "mpsi", "url": "u2", "login": "l2", "dossier": "d2"})
+        self.assertEqual(len(c["classes"]), 1)
+        self.assertEqual(c["classes"][0]["url"], "u2")
+
+    def test_lister(self):
+        c = self._config()
+        self.assertEqual(len(cdp_config.lister(c)), 1)
+
+    def test_retirer(self):
+        c = self._config()
+        cdp_config.retirer(c, "mpsi")
+        self.assertEqual(c["classes"], [])
+
+    def test_retirer_absent_ne_casse_pas(self):
+        c = self._config()
+        cdp_config.retirer(c, "inconnue")
+        self.assertEqual(len(c["classes"]), 1)
+
+    def test_contient(self):
+        c = self._config()
+        self.assertTrue(cdp_config.contient(c, "mpsi"))
+        self.assertFalse(cdp_config.contient(c, "pcsi"))
+
+
 if __name__ == "__main__":
     unittest.main()
