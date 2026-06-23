@@ -424,7 +424,7 @@ class TestRechercheAmelioree(unittest.TestCase):
         self.assertIn('normalize("NFD")', cdp_viewer.PAGE_HTML)
         self.assertIn("function sansAccents", cdp_viewer.PAGE_HTML)
         self.assertIn("function dossierParent", cdp_viewer.PAGE_HTML)
-        self.assertIn('class="chemin"', cdp_viewer.PAGE_HTML)
+        self.assertIn('className = "chemin"', cdp_viewer.PAGE_HTML)
 
 
 class TestNavigationClavier(unittest.TestCase):

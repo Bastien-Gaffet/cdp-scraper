@@ -319,8 +319,9 @@ function rechercher(arbre, q) {
            const l = ligne(f);
            const parent = dossierParent(f.chemin);
            if (parent) {
-             l.querySelector(".nom").insertAdjacentHTML(
-               "beforeend", '<span class="chemin">' + parent.replace(/</g, "&lt;") + "</span>");
+             const chem = document.createElement("span");
+             chem.className = "chemin"; chem.textContent = parent;
+             l.querySelector(".nom").appendChild(chem);
            }
            liste.appendChild(l);
          });
