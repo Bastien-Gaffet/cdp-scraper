@@ -25,7 +25,7 @@ from pathlib import Path
 
 import cdp_manifeste
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 PAGE_HTML = r"""<!doctype html>
 <html lang="fr">
@@ -76,6 +76,7 @@ main { flex:1; display:flex; min-height:0; }
 .ligne { display:flex; align-items:center; gap:10px; padding:8px;
   border-bottom:1px solid var(--border); }
 .ligne:hover { background:var(--hover); }
+.ligne.actif { background:var(--hover); outline:2px solid var(--accent); outline-offset:-2px; }
 .ico { display:inline-flex; align-items:center; flex-shrink:0; color:var(--muted); }
 .ico svg { display:block; }
 .ligne.dossier .ico { color:var(--accent); }
@@ -83,6 +84,7 @@ main { flex:1; display:flex; min-height:0; }
 .ligne.dossier .nom { font-weight:600; }
 .ligne .meta { color:var(--muted); font-size:12px; margin-left:auto; flex-shrink:0;
   padding-left:12px; }
+.ligne .nom .chemin { color:var(--muted); font-size:12px; margin-left:8px; }
 .vide { color:var(--muted); padding:24px 0; }
 #theme { display:inline-flex; align-items:center; }
 .fil a, .fil .courant { display:inline-flex; align-items:center; gap:4px; }
@@ -108,6 +110,7 @@ const elRecherche = document.getElementById("recherche");
 let arbres = {};          // cache : nom de classe -> nœud racine
 let classesDispo = [];
 let fenetreRecents = 30;   // jours
+let selection = -1;   // index dans la liste courante (navigation clavier)
 
 // Icônes SVG (suivent la couleur du texte, sans emoji).
 const ICONES = {
@@ -239,6 +242,7 @@ function rendreFil(arbre, cible) {
 
 // ── Vue liste du dossier courant ────────────────────────────────────────────
 function rendreListe(arbre, cible) {
+  selection = -1;
   elExplorateur.innerHTML = "";
   elExplorateur.appendChild(rendreFil(arbre, cible));
   const enfants = tri(cible.enfants);
@@ -282,6 +286,13 @@ function rendreRubriques(arbre, cible) {
 }
 
 // ── Recherche (tous les documents de la classe par nom) ─────────────────────
+function sansAccents(s) {
+  return s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+function dossierParent(chemin) {
+  const i = chemin.lastIndexOf("/");
+  return i < 0 ? "" : chemin.slice(0, i);
+}
 function collecter(noeud, acc) {
   (noeud.enfants || []).forEach(e => {
     if (e.type === "dossier") collecter(e, acc); else acc.push(e);
@@ -289,11 +300,13 @@ function collecter(noeud, acc) {
   return acc;
 }
 function rechercher(arbre, q) {
+  selection = -1;
   elExplorateur.innerHTML = "";
   const fil = document.createElement("div"); fil.className = "fil";
   fil.textContent = "Résultats pour « " + q + " »";
   elExplorateur.appendChild(fil);
-  const trouves = collecter(arbre, []).filter(f => f.nom.toLowerCase().includes(q));
+  const nq = sansAccents(q);
+  const trouves = collecter(arbre, []).filter(f => sansAccents(f.nom).includes(nq));
   if (!trouves.length) {
     const v = document.createElement("div"); v.className = "vide";
     v.textContent = "Aucun document ne correspond.";
@@ -302,12 +315,22 @@ function rechercher(arbre, q) {
   }
   const liste = document.createElement("div"); liste.className = "liste";
   trouves.sort((a, b) => a.nom.localeCompare(b.nom, "fr", {sensitivity:"base"}))
-         .forEach(f => liste.appendChild(ligne(f)));
+         .forEach(f => {
+           const l = ligne(f);
+           const parent = dossierParent(f.chemin);
+           if (parent) {
+             const chem = document.createElement("span");
+             chem.className = "chemin"; chem.textContent = parent;
+             l.querySelector(".nom").appendChild(chem);
+           }
+           liste.appendChild(l);
+         });
   elExplorateur.appendChild(liste);
 }
 
 // ── Vue « récemment ajoutés » (fenêtre glissante de N jours) ────────────────
 function rendreRecents(arbre) {
+  selection = -1;
   elExplorateur.innerHTML = "";
   const barre = document.createElement("div");
   barre.className = "fil";
@@ -395,6 +418,47 @@ document.getElementById("theme").onclick = () => {
 if (localStorage.getItem("cdp-theme") === "dark")
   document.documentElement.setAttribute("data-theme", "dark");
 
+function lignesVisibles() {
+  return Array.from(elExplorateur.querySelectorAll("a.ligne"));
+}
+function surligner(i) {
+  const lignes = lignesVisibles();
+  if (!lignes.length) { selection = -1; return; }
+  selection = Math.max(0, Math.min(i, lignes.length - 1));
+  lignes.forEach((l, k) => l.classList.toggle("actif", k === selection));
+  lignes[selection].scrollIntoView({block: "nearest"});
+}
+function remonter() {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  const segs = hash.split("/");
+  if (segs.length <= 1) return;                 // déjà à la racine de la classe
+  segs.pop();
+  location.hash = segs.map(encodeURIComponent).join("/");
+}
+function classeSuivante() {
+  if (classesDispo.length <= 1) return;
+  const i = classesDispo.indexOf(elClasse.value);
+  location.hash = encodeURIComponent(classesDispo[(i + 1) % classesDispo.length]);
+}
+document.addEventListener("keydown", (e) => {
+  const dansRecherche = document.activeElement === elRecherche;
+  if (e.key === "/") {
+    if (!dansRecherche) { e.preventDefault(); elRecherche.focus(); }
+    return;
+  }
+  if (e.key === "Escape") { elRecherche.value = ""; naviguer(); elRecherche.blur(); return; }
+  if (e.key === "ArrowDown") { e.preventDefault(); surligner(selection + 1); return; }
+  if (e.key === "ArrowUp")   { e.preventDefault(); surligner(selection - 1); return; }
+  if (e.key === "Enter") {
+    const lignes = lignesVisibles();
+    if (selection >= 0 && lignes[selection]) { e.preventDefault(); lignes[selection].click(); }
+    return;
+  }
+  if (dansRecherche) return;                    // les lettres servent à taper
+  if (e.key === "ArrowLeft" || e.key === "Backspace") { e.preventDefault(); remonter(); return; }
+  if (e.key === "t") { document.getElementById("theme").click(); return; }
+  if (e.key === "c") { classeSuivante(); return; }
+});
 init();
 </script>
 </body>
@@ -534,6 +598,60 @@ btn.onclick = async () => {
 </script>
 </body>
 </html>"""
+
+
+PAGE_ERREUR = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Erreur __CODE__ — cdp-viewer</title>
+<style>
+:root{--bg:#f7f7f8;--txt:#1d1d1f;--muted:#6b6b70;--accent:#2563eb}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#16171a;--txt:#e7e7ea;--muted:#9a9aa2;--accent:#6ea0ff}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:6px;text-align:center;padding:24px;
+  font:14px/1.5 system-ui,sans-serif;color:var(--txt);background:var(--bg)}
+.code{font-size:64px;font-weight:700;line-height:1;color:var(--accent)}
+h1{font-size:20px;margin:8px 0 0}
+p{color:var(--muted);max-width:34rem;margin:4px 0 16px}
+a{display:inline-block;padding:8px 16px;border-radius:8px;text-decoration:none;
+  border:1px solid var(--accent);color:var(--accent)}
+a:hover{background:var(--accent);color:#fff}
+</style>
+</head>
+<body>
+<div class="code">__CODE__</div>
+<h1>__TITRE__</h1>
+<p>__MESSAGE__</p>
+<a href="/">Retour à l'accueil</a>
+</body>
+</html>"""
+
+MESSAGES_ERREUR = {
+    "classe": ("Classe introuvable",
+               "Cette classe n'existe pas ou n'a pas encore été téléchargée. "
+               "Lancez cdp_scraper.py pour la récupérer."),
+    "fichier": ("Fichier introuvable",
+                "Ce fichier n'existe plus — il a peut-être été supprimé ou "
+                "renommé depuis la dernière synchronisation."),
+    "acces": ("Accès refusé",
+              "Ce chemin sort du dossier des cours autorisé."),
+    "introuvable": ("Page introuvable",
+                    "Cette adresse ne correspond à aucune page du viewer."),
+}
+
+
+def page_erreur(code: int, contexte: str) -> bytes:
+    """HTML d'erreur thémé (clair/sombre via prefers-color-scheme)."""
+    titre, message = MESSAGES_ERREUR.get(contexte, ("Erreur", contexte))
+    page = (PAGE_ERREUR
+            .replace("__CODE__", str(code))
+            .replace("__TITRE__", html.escape(titre))
+            .replace("__MESSAGE__", html.escape(message)))
+    return page.encode("utf-8")
 
 
 # Types de jetons colorisés comme chaîne (inclut les f-strings de Python 3.12+).
@@ -859,8 +977,9 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
         self._envoyer_octets(code, json.dumps(donnees).encode("utf-8"),
                              "application/json; charset=utf-8", cache=False)
 
-    def _erreur(self, code: int, message: str):
-        self._envoyer_octets(code, message.encode("utf-8"), "text/plain; charset=utf-8")
+    def _erreur(self, code: int, contexte: str):
+        self._envoyer_octets(code, page_erreur(code, contexte),
+                             "text/html; charset=utf-8", cache=False)
 
     def do_GET(self):
         parties = urllib.parse.urlparse(self.path)
@@ -881,7 +1000,7 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             classe = (params.get("classe") or [""])[0]
             arbre = construire_arbre(racine, classe)
             if arbre is None:
-                self._erreur(404, "Classe introuvable")
+                self._erreur(404, "classe")
                 return
             self._envoyer_json(200, arbre)
             return
@@ -890,10 +1009,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/ouvrir/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.is_file():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
             page = (PAGE_GGB
@@ -908,10 +1027,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/code/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.is_file():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             source = cible.read_text(encoding="utf-8", errors="replace")
             corps = colorier_python(source)
@@ -933,10 +1052,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/lancer/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.is_file():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             try:
                 info = lancer_python(cible)
@@ -950,10 +1069,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/file/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.is_file():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             ext = cible.suffix.lstrip(".").lower()
             if ext in EXT_TEXTE:
@@ -967,10 +1086,10 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             rel = urllib.parse.unquote(chemin[len("/reveal/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
-                self._erreur(403, "Acces refuse")
+                self._erreur(403, "acces")
                 return
             if not cible.exists():
-                self._erreur(404, "Fichier introuvable")
+                self._erreur(404, "fichier")
                 return
             try:
                 ouvrir_ou_reveler(cible)
@@ -980,7 +1099,7 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        self._erreur(404, "Introuvable")
+        self._erreur(404, "introuvable")
 
     def log_message(self, *args):  # silence: pas de log par requête
         pass

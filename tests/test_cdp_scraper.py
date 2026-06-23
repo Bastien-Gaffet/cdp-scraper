@@ -46,7 +46,7 @@ class TestVersion(unittest.TestCase):
         self.assertEqual(cdp_scraper.__version__, cdp_viewer.__version__)
 
     def test_version_attendue(self):
-        self.assertEqual(cdp_scraper.__version__, "1.2.0")
+        self.assertEqual(cdp_scraper.__version__, "1.3.0")
 
 
 class TestAnalyserPage(unittest.TestCase):
@@ -404,6 +404,131 @@ class TestDrapeauxSynchro(unittest.TestCase):
             args = cdp_scraper.parse_args()
         self.assertTrue(args.reprise)
         self.assertFalse(args.complet)
+
+
+class TestArgsConfig(unittest.TestCase):
+    def test_noms_positionnels(self):
+        args = cdp_scraper.parse_args(["mpsi", "pcsi"])
+        self.assertEqual(args.noms, ["mpsi", "pcsi"])
+
+    def test_aucun_nom_liste_vide(self):
+        args = cdp_scraper.parse_args([])
+        self.assertEqual(args.noms, [])
+
+    def test_flags_config(self):
+        args = cdp_scraper.parse_args(["--config", "x.json", "--tout"])
+        self.assertEqual(args.config, "x.json")
+        self.assertTrue(args.tout)
+
+    def test_config_lister_et_supprimer(self):
+        args = cdp_scraper.parse_args(["--config-lister"])
+        self.assertTrue(args.config_lister)
+        args = cdp_scraper.parse_args(["--config-supprimer", "mpsi"])
+        self.assertEqual(args.config_supprimer, "mpsi")
+
+
+class TestIndicesMenu(unittest.TestCase):
+    def test_vide_tous(self):
+        self.assertEqual(cdp_scraper._indices_menu("", 3), [0, 1, 2])
+
+    def test_tout_tous(self):
+        self.assertEqual(cdp_scraper._indices_menu("tout", 3), [0, 1, 2])
+
+    def test_liste(self):
+        self.assertEqual(cdp_scraper._indices_menu("1,3", 3), [0, 2])
+
+    def test_espaces_et_doublons_ignores(self):
+        self.assertEqual(cdp_scraper._indices_menu("2, 2 , 1", 3), [1, 0])
+
+    def test_hors_plage_et_non_numerique_ignores(self):
+        self.assertEqual(cdp_scraper._indices_menu("0,4,a,2", 3), [1])
+
+
+import types
+
+class TestTraiterClasse(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dossier = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _args(self):
+        return types.SimpleNamespace(reprise=False, complet=False, sans_colles=True,
+                                     profondeur=None, delai=0.0)
+
+    def test_connexion_echouee_resume_ko(self):
+        cfg = {"nom": "mpsi", "url": "https://x/mpsi", "login": "a", "dossier": self.dossier}
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(False, "401")):
+            resume = cdp_scraper.traiter_classe(cfg, self._args(), "secret", True)
+        self.assertFalse(resume["ok"])
+        self.assertEqual(resume["nom"], "mpsi")
+
+    def test_simulation_compte_les_documents(self):
+        cfg = {"nom": "mpsi", "url": "https://x/mpsi", "login": "a", "dossier": self.dossier}
+        doc = {"id": "1", "nom": "a.pdf", "url": "u", "chemin": "", "type": "pdf"}
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(True, "ok")), \
+             mock.patch.object(cdp_scraper, "crawler", return_value=[doc]), \
+             mock.patch.object(cdp_scraper, "telecharger",
+                               return_value=("simulation", 10, "a.pdf")) as tele:
+            resume = cdp_scraper.traiter_classe(cfg, self._args(), "secret", True)
+        self.assertTrue(resume["ok"])
+        self.assertEqual(resume["compteur"]["simulation"], 1)
+        tele.assert_called_once()
+        self.assertEqual(list(Path(self.dossier).glob("**/.cdp-manifest.json")), [])
+
+    def test_manifeste_version_future_resume_ko_sans_exit(self):
+        cfg = {"nom": "mpsi", "url": "https://x/mpsi", "login": "a", "dossier": self.dossier}
+        doc = {"id": "1", "nom": "a.pdf", "url": "u", "chemin": "", "type": "pdf"}
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(True, "ok")), \
+             mock.patch.object(cdp_scraper, "crawler", return_value=[doc]), \
+             mock.patch.object(cdp_scraper.cdp_manifeste, "charger",
+                               side_effect=cdp_scraper.cdp_manifeste.ManifesteVersionFuture("trop récent")):
+            resume = cdp_scraper.traiter_classe(cfg, self._args(), "secret", True)
+        self.assertFalse(resume["ok"])
+        self.assertEqual(resume["nom"], "mpsi")
+
+
+class TestMainSelection(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin = Path(self.tmp.name) / "config.json"
+        import cdp_config
+        c = cdp_config._vide()
+        for n in ("mpsi", "pcsi"):
+            c["classes"].append({"nom": n, "url": f"https://x/{n}",
+                                 "login": "l", "dossier": "cours_cdp"})
+        cdp_config.enregistrer(self.chemin, c)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, argv, traites):
+        def faux_traiter(cfg, args, mdp, simulation):
+            traites.append(cfg["nom"])
+            return {"nom": cfg["nom"], "ok": True, "compteur": {"ok": 1, "echec": 0}, "volume": {}}
+        with mock.patch.object(cdp_scraper, "parse_args",
+                               return_value=cdp_scraper.parse_args(argv)), \
+             mock.patch.object(cdp_scraper, "verifier_accord"), \
+             mock.patch.object(cdp_scraper.cdp_config, "chemin_config",
+                               return_value=self.chemin), \
+             mock.patch.object(cdp_scraper, "demander", return_value="motdepasse"), \
+             mock.patch.object(cdp_scraper, "traiter_classe", side_effect=faux_traiter):
+            cdp_scraper.main()
+
+    def test_noms_filtrent(self):
+        traites = []
+        self._run(["pcsi"], traites)
+        self.assertEqual(traites, ["pcsi"])
+
+    def test_tout_traite_toutes(self):
+        traites = []
+        self._run(["--tout"], traites)
+        self.assertEqual(sorted(traites), ["mpsi", "pcsi"])
 
 
 if __name__ == "__main__":

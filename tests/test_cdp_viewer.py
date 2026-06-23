@@ -350,6 +350,21 @@ class TestServeur(unittest.TestCase):
         self.assertIn("id=\"explorateur\"", html)
         self.assertIn("/api/classes", html)
 
+    def test_erreur_404_html_contextuel(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/file/PCSI/Maths/absent.pdf")
+        e = ctx.exception
+        self.assertEqual(e.code, 404)
+        self.assertIn("text/html", e.headers["Content-Type"])
+        self.assertIn("Fichier introuvable", e.read().decode("utf-8"))
+
+    def test_erreur_403_html_contextuel(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/file/../secret.txt")
+        e = ctx.exception
+        self.assertEqual(e.code, 403)
+        self.assertIn("Accès refusé", e.read().decode("utf-8"))
+
 
 class TestExclusionDotfiles(unittest.TestCase):
     def setUp(self):
@@ -385,7 +400,42 @@ class TestVersionCLI(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0)
         # argparse action="version" écrit sur stdout (3.4+) ; on couvre les deux flux.
-        self.assertIn("cdp-viewer 1.2.0", res.stdout + res.stderr)
+        self.assertIn("cdp-viewer 1.3.0", res.stdout + res.stderr)
+
+
+class TestPageErreur(unittest.TestCase):
+    def test_contient_code_titre_message(self):
+        page = cdp_viewer.page_erreur(404, "fichier")
+        texte = page.decode("utf-8")
+        self.assertIn("404", texte)
+        self.assertIn("Fichier introuvable", texte)
+        self.assertIn("Retour à l'accueil", texte)
+
+    def test_contexte_classe(self):
+        self.assertIn("Classe introuvable",
+                      cdp_viewer.page_erreur(404, "classe").decode("utf-8"))
+
+    def test_contexte_inconnu_repli(self):
+        self.assertIn("Erreur", cdp_viewer.page_erreur(418, "zzz").decode("utf-8"))
+
+
+class TestRechercheAmelioree(unittest.TestCase):
+    def test_helpers_recherche_presents(self):
+        self.assertIn('normalize("NFD")', cdp_viewer.PAGE_HTML)
+        self.assertIn("function sansAccents", cdp_viewer.PAGE_HTML)
+        self.assertIn("function dossierParent", cdp_viewer.PAGE_HTML)
+        self.assertIn('className = "chemin"', cdp_viewer.PAGE_HTML)
+
+
+class TestNavigationClavier(unittest.TestCase):
+    def test_handler_et_helpers_presents(self):
+        p = cdp_viewer.PAGE_HTML
+        self.assertIn('addEventListener("keydown"', p)
+        self.assertIn("function surligner", p)
+        self.assertIn("function remonter", p)
+        self.assertIn("function classeSuivante", p)
+        self.assertIn("scrollIntoView", p)
+        self.assertIn(".ligne.actif", p)
 
 
 if __name__ == "__main__":

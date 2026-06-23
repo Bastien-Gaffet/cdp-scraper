@@ -32,9 +32,10 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 import cdp_manifeste
+import cdp_config
 from urllib.parse import urljoin, urlsplit, unquote
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
 
@@ -504,6 +505,22 @@ def demander_oui_non(question: str, defaut: bool = False) -> bool:
     return rep in ("o", "oui", "y", "yes")
 
 
+def _indices_menu(saisie: str, total: int) -> list:
+    """Convertit une saisie de menu en indices 0-based valides.
+    '' ou 'tout' → tous ; '1,3' → [0,2]. Ignore hors-plage / non numérique /
+    doublons (en conservant l'ordre de saisie)."""
+    s = saisie.strip().lower()
+    if s == "" or s == "tout":
+        return list(range(total))
+    indices = []
+    for morceau in s.replace(" ", "").split(","):
+        if morceau.isdigit():
+            i = int(morceau) - 1
+            if 0 <= i < total and i not in indices:
+                indices.append(i)
+    return indices
+
+
 def normaliser_url(url: str) -> str:
     url = url.strip()
     if not url.startswith(("http://", "https://")):
@@ -576,7 +593,7 @@ def verifier_accord(accepter_sans_demander: bool = False):
 
 # ─── Programme principal ─────────────────────────────────────────────────────
 
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(
         description="Scraper cahier-de-prepa.fr — connexion + téléchargement de tous les documents.",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -612,8 +629,18 @@ Exemples :
     synchro.add_argument("--reprise", action="store_true",
                          help="Reprendre uniquement les téléchargements en échec, sans re-explorer\n"
                               "(les programmes de colles en texte ne sont pas concernés)")
+    p.add_argument("noms", nargs="*", metavar="CLASSE",
+                   help="Noms de classes mémorisées à traiter (toutes/menu si aucun)")
+    p.add_argument("--config", metavar="CHEMIN",
+                   help="Chemin du fichier de config (défaut : .cdp-scraper/config.json)")
+    p.add_argument("--tout", action="store_true",
+                   help="Traiter toutes les classes mémorisées, sans menu")
+    p.add_argument("--config-lister", action="store_true",
+                   help="Afficher les classes mémorisées puis quitter")
+    p.add_argument("--config-supprimer", metavar="NOM",
+                   help="Retirer une classe de la config puis quitter")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
 def executer_reprise(session, dossier: Path, delai: float):
@@ -663,52 +690,47 @@ def executer_reprise(session, dossier: Path, delai: float):
     print()
 
 
-def main():
-    args = parse_args()
+def _afficher_resume_classe(simulation, compteur, volume, plan, dossier):
+    print()
+    print(gras("─── RÉSUMÉ " + "─" * 40))
+    if simulation:
+        print(f"  À télécharger : {gras(str(compteur['simulation']))}")
+        print(f"  Volume estimé : {gras(fmt_taille(volume['simulation']))}")
+        print(f"  À jour (ignorés) : {dim(str(len(plan['a_jour'])))}")
+        print(jaune("  (mode simulation — relancez sans --simulation pour télécharger)"))
+    else:
+        print(f"  Nouveaux / mis à jour : {vert(str(compteur['ok']))}   ({fmt_taille(volume['ok'])})")
+        print(f"  À jour (ignorés)      : {dim(str(len(plan['a_jour'])))}")
+        if compteur["echec"]:
+            print(f"  Échecs                : {rouge(str(compteur['echec']))}   (relançables avec --reprise)")
+        if plan["disparus"]:
+            print(f"  Disparus du serveur   : {jaune(str(len(plan['disparus'])))}   (fichiers conservés)")
+        print(f"\n  Fichiers dans : {cyan(str(dossier.resolve()))}")
+    print()
 
-    print(gras(cyan("\n══════════ Scraper cahier-de-prepa.fr ══════════\n")))
 
-    # Conditions d'usage (affichées + acceptées une seule fois).
-    verifier_accord(args.accepter_conditions)
-
-    # Mode interactif si l'essentiel manque : on complète au clavier.
-    interactif = not args.url
-    if interactif:
-        print("Mode interactif — répondez aux questions (Entrée = valeur par défaut).\n")
-
-    url    = normaliser_url(args.url) if args.url else normaliser_url(
-                 demander("URL de la classe", defaut="https://cahier-de-prepa.fr/"))
-    login  = args.login or demander("Identifiant / email")
-    mdp    = args.mdp   or demander("Mot de passe", secret=True)
-    sortie = args.sortie or (demander("Dossier de destination", defaut="cours_cdp")
-                             if interactif else "cours_cdp")
-
-    simulation = args.simulation
-    if interactif and not simulation:
-        # Formulé en « télécharger ? » (plus intuitif que « mode simulation ? ») :
-        # O / Entrée = télécharger, N = simulation (ne rien télécharger).
-        simulation = not demander_oui_non(
-            "Télécharger les fichiers maintenant ? (« non » = simulation, ne rien écrire)",
-            defaut=True)
-
-    # ── Connexion ────────────────────────────────────────────────────────────
-    print(f"\nConnexion à {cyan(url)} …")
+def traiter_classe(cfg: dict, args, mdp: str, simulation: bool) -> dict:
+    """Traite une classe de bout en bout. `cfg` = {nom, url, login, dossier}
+    (sans mot de passe). Renvoie un résumé agrégeable :
+    {nom, ok, compteur, volume}."""
+    nom_classe = cfg["nom"]
+    url = cfg["url"]
+    print(gras(cyan(f"\n── Classe : {nom_classe} ──")))
+    print(f"Connexion à {cyan(url)} …")
     session = creer_session()
-    ok, message = connexion(session, url, login, mdp)
+    ok, message = connexion(session, url, cfg["login"], mdp)
     if not ok:
         print(rouge(f"Connexion échouée : {message}"))
         print(jaune("Vérifiez l'URL de la classe, l'identifiant et le mot de passe."))
-        sys.exit(1)
+        return {"nom": nom_classe, "ok": False, "compteur": {}, "volume": {}}
     print(vert("Connexion réussie."))
 
-    nom_classe = nom_sur(urlsplit(url).path.strip("/").split("/")[-1]) or "classe"
-    dossier = Path(sortie) / nom_classe
+    dossier = Path(cfg["dossier"]) / nom_classe
 
     if args.reprise:
         executer_reprise(session, dossier, args.delai)
-        return
+        return {"nom": nom_classe, "ok": True, "compteur": {}, "volume": {}}
 
-    # ── Exploration ──────────────────────────────────────────────────────────
     prof = "illimitée" if args.profondeur is None else args.profondeur
     print(f"\nExploration des documents (profondeur {prof}) …")
     documents = crawler(session, url, args.profondeur, args.delai)
@@ -728,16 +750,15 @@ def main():
     if not documents:
         print(jaune("\nAucun document trouvé."))
         print(jaune("La classe n'a peut-être pas de documents accessibles avec ce compte."))
-        sys.exit(0)
+        return {"nom": nom_classe, "ok": True, "compteur": {}, "volume": {}}
 
     print(f"\n{gras(str(len(documents)))} document(s) trouvé(s).")
 
-    # ── Planification (synchro incrémentale) ──────────────────────────────────
     try:
         manifeste = cdp_manifeste.charger(dossier)
     except cdp_manifeste.ManifesteVersionFuture as e:
         print(rouge(f"\n{e}"))
-        sys.exit(1)
+        return {"nom": nom_classe, "ok": False, "compteur": {}, "volume": {}}
 
     plan = cdp_manifeste.planifier(documents, manifeste, dossier, complet=args.complet)
     a_faire = plan["nouveau"] + plan["modifie"] + plan["a_reprendre"]
@@ -768,7 +789,6 @@ def main():
         if not simulation and args.delai:
             time.sleep(args.delai)
 
-    # ── Manifeste : disparus + enregistrement (hors simulation) ───────────────
     if not simulation:
         cdp_manifeste.marquer_disparus(manifeste, plan["disparus"])
         manifeste["version"] = cdp_manifeste.VERSION
@@ -777,23 +797,144 @@ def main():
         manifeste["derniere_synchro"] = datetime.now().isoformat(timespec="seconds")
         cdp_manifeste.enregistrer(dossier, manifeste)
 
-    # ── Résumé ───────────────────────────────────────────────────────────────
+    _afficher_resume_classe(simulation, compteur, volume, plan, dossier)
+    return {"nom": nom_classe, "ok": True, "compteur": compteur, "volume": volume}
+
+
+def menu_selection(classes: list) -> list:
+    """Affiche la liste numérotée des classes et renvoie celles choisies."""
+    print("\nClasses mémorisées :")
+    for i, c in enumerate(classes, 1):
+        print(f"  {i}. {gras(c['nom'])}  {dim(c.get('url', ''))}")
+    saisie = input("\nLesquelles traiter ? (ex. « 1,3 », « tout », Entrée = tout) : ")
+    return [classes[i] for i in _indices_menu(saisie, len(classes))]
+
+
+def afficher_config(config: dict):
+    classes = cdp_config.lister(config)
+    if not classes:
+        print(jaune("\nAucune classe mémorisée."))
+        return
+    print(gras(f"\n{len(classes)} classe(s) mémorisée(s) :\n"))
+    for c in classes:
+        print(f"  • {gras(c['nom'])}")
+        print(f"      url     : {c.get('url', '')}")
+        print(f"      login   : {c.get('login', '')}")
+        print(f"      dossier : {c.get('dossier', '')}")
     print()
-    print(gras("─── RÉSUMÉ " + "─" * 40))
-    if simulation:
-        print(f"  À télécharger : {gras(str(compteur['simulation']))}")
-        print(f"  Volume estimé : {gras(fmt_taille(volume['simulation']))}")
-        print(f"  À jour (ignorés) : {dim(str(len(plan['a_jour'])))}")
-        print(jaune("  (mode simulation — relancez sans --simulation pour télécharger)"))
-    else:
-        print(f"  Nouveaux / mis à jour : {vert(str(compteur['ok']))}   ({fmt_taille(volume['ok'])})")
-        print(f"  À jour (ignorés)      : {dim(str(len(plan['a_jour'])))}")
-        if compteur["echec"]:
-            print(f"  Échecs                : {rouge(str(compteur['echec']))}   (relançables avec --reprise)")
-        if plan["disparus"]:
-            print(f"  Disparus du serveur   : {jaune(str(len(plan['disparus'])))}   (fichiers conservés)")
-        print(f"\n  Fichiers dans : {cyan(str(dossier.resolve()))}")
+
+
+def afficher_resume_global(resumes: list):
+    """Résumé agrégé d'un run multi-classes (rien si une seule classe : son
+    résumé a déjà été affiché)."""
+    if len(resumes) <= 1:
+        return
     print()
+    print(gras("═══ RÉSUMÉ GLOBAL " + "═" * 33))
+    total_ok = total_echec = 0
+    for r in resumes:
+        c = r.get("compteur", {})
+        ok = c.get("ok", 0)
+        echec = c.get("echec", 0)
+        total_ok += ok
+        total_echec += echec
+        etat = vert("OK") if r.get("ok") else rouge("connexion échouée")
+        ligne = f"  {gras(r['nom'])} : {ok} téléchargé(s)"
+        if echec:
+            ligne += f", {rouge(str(echec))} échec(s)"
+        print(f"{ligne}   [{etat}]")
+    suffixe = f", {rouge(str(total_echec))} échec(s)" if total_echec else ""
+    print(f"\n  Total : {vert(str(total_ok))} téléchargé(s){suffixe}.")
+    print()
+
+
+def run_classe_unique(args, config, chemin_cfg):
+    """Mode mono-classe : --url fourni OU config vide (interactif). Complète au
+    clavier ce qui manque, traite la classe, puis propose de la mémoriser."""
+    interactif = not args.url
+    if interactif:
+        print("Mode interactif — répondez aux questions (Entrée = valeur par défaut).\n")
+    url = normaliser_url(args.url) if args.url else normaliser_url(
+              demander("URL de la classe", defaut="https://cahier-de-prepa.fr/"))
+    login = args.login or demander("Identifiant / email")
+    mdp = args.mdp or demander("Mot de passe", secret=True)
+    sortie = args.sortie or (demander("Dossier de destination", defaut="cours_cdp")
+                             if interactif else "cours_cdp")
+
+    simulation = args.simulation
+    if interactif and not simulation:
+        simulation = not demander_oui_non(
+            "Télécharger les fichiers maintenant ? (« non » = simulation, ne rien écrire)",
+            defaut=True)
+
+    nom = nom_sur(urlsplit(url).path.strip("/").split("/")[-1]) or "classe"
+    cfg = {"nom": nom, "url": url, "login": login, "dossier": sortie}
+    resume = traiter_classe(cfg, args, mdp, simulation)
+
+    if (resume.get("ok") and not args.reprise and interactif
+            and not cdp_config.contient(config, nom)):
+        if demander_oui_non(
+                f"Mémoriser la classe « {nom} » dans la config ? (jamais le mot de passe)",
+                defaut=True):
+            cdp_config.ajouter_ou_maj(config, cfg)
+            cdp_config.enregistrer(chemin_cfg, config)
+            print(vert(f"Classe « {nom} » mémorisée dans {chemin_cfg}."))
+
+
+def main():
+    args = parse_args()
+
+    print(gras(cyan("\n══════════ Scraper cahier-de-prepa.fr ══════════\n")))
+
+    # Conditions d'usage (affichées + acceptées une seule fois).
+    verifier_accord(args.accepter_conditions)
+
+    chemin_cfg = cdp_config.chemin_config(args.config)
+    try:
+        config = cdp_config.charger(chemin_cfg)
+    except cdp_config.ConfigVersionFuture as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+    # Commandes de gestion : exécutées puis sortie immédiate.
+    if args.config_lister:
+        afficher_config(config)
+        return
+    if args.config_supprimer:
+        if not cdp_config.contient(config, args.config_supprimer):
+            print(jaune(f"\nClasse « {args.config_supprimer} » absente de la config."))
+            return
+        cdp_config.retirer(config, args.config_supprimer)
+        cdp_config.enregistrer(chemin_cfg, config)
+        print(vert(f"\nClasse « {args.config_supprimer} » retirée de la config."))
+        return
+
+    # Mono-classe : --url explicite, ou config vide → interactif mono-classe.
+    if args.url or not cdp_config.lister(config):
+        run_classe_unique(args, config, chemin_cfg)
+        return
+
+    # Multi-classes piloté par la config.
+    try:
+        if args.noms:
+            choisies = cdp_config.selectionner(config, args.noms)
+        elif args.tout:
+            choisies = cdp_config.lister(config)
+        else:
+            choisies = menu_selection(cdp_config.lister(config))
+    except cdp_config.ClasseInconnue as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+    if not choisies:
+        print(jaune("\nAucune classe sélectionnée."))
+        return
+
+    resumes = []
+    for cfg in choisies:
+        mdp = args.mdp or demander(f"Mot de passe pour « {cfg['nom']} »", secret=True)
+        resumes.append(traiter_classe(cfg, args, mdp, args.simulation))
+    afficher_resume_global(resumes)
 
 
 if __name__ == "__main__":
