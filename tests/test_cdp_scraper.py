@@ -406,5 +406,26 @@ class TestDrapeauxSynchro(unittest.TestCase):
         self.assertFalse(args.complet)
 
 
+class TestArgsConfig(unittest.TestCase):
+    def test_noms_positionnels(self):
+        args = cdp_scraper.parse_args(["mpsi", "pcsi"])
+        self.assertEqual(args.noms, ["mpsi", "pcsi"])
+
+    def test_aucun_nom_liste_vide(self):
+        args = cdp_scraper.parse_args([])
+        self.assertEqual(args.noms, [])
+
+    def test_flags_config(self):
+        args = cdp_scraper.parse_args(["--config", "x.json", "--tout"])
+        self.assertEqual(args.config, "x.json")
+        self.assertTrue(args.tout)
+
+    def test_config_lister_et_supprimer(self):
+        args = cdp_scraper.parse_args(["--config-lister"])
+        self.assertTrue(args.config_lister)
+        args = cdp_scraper.parse_args(["--config-supprimer", "mpsi"])
+        self.assertEqual(args.config_supprimer, "mpsi")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 import cdp_manifeste
+import cdp_config
 from urllib.parse import urljoin, urlsplit, unquote
 
 __version__ = "1.2.0"
@@ -576,7 +577,7 @@ def verifier_accord(accepter_sans_demander: bool = False):
 
 # ─── Programme principal ─────────────────────────────────────────────────────
 
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(
         description="Scraper cahier-de-prepa.fr — connexion + téléchargement de tous les documents.",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -612,8 +613,18 @@ Exemples :
     synchro.add_argument("--reprise", action="store_true",
                          help="Reprendre uniquement les téléchargements en échec, sans re-explorer\n"
                               "(les programmes de colles en texte ne sont pas concernés)")
+    p.add_argument("noms", nargs="*", metavar="CLASSE",
+                   help="Noms de classes mémorisées à traiter (toutes/menu si aucun)")
+    p.add_argument("--config", metavar="CHEMIN",
+                   help="Chemin du fichier de config (défaut : .cdp-scraper/config.json)")
+    p.add_argument("--tout", action="store_true",
+                   help="Traiter toutes les classes mémorisées, sans menu")
+    p.add_argument("--config-lister", action="store_true",
+                   help="Afficher les classes mémorisées puis quitter")
+    p.add_argument("--config-supprimer", metavar="NOM",
+                   help="Retirer une classe de la config puis quitter")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
 def executer_reprise(session, dossier: Path, delai: float):
