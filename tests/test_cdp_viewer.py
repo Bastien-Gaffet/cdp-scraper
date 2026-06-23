@@ -427,5 +427,16 @@ class TestRechercheAmelioree(unittest.TestCase):
         self.assertIn('class="chemin"', cdp_viewer.PAGE_HTML)
 
 
+class TestNavigationClavier(unittest.TestCase):
+    def test_handler_et_helpers_presents(self):
+        p = cdp_viewer.PAGE_HTML
+        self.assertIn('addEventListener("keydown"', p)
+        self.assertIn("function surligner", p)
+        self.assertIn("function remonter", p)
+        self.assertIn("function classeSuivante", p)
+        self.assertIn("scrollIntoView", p)
+        self.assertIn(".ligne.actif", p)
+
+
 if __name__ == "__main__":
     unittest.main()

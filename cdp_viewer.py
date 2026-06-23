@@ -76,6 +76,7 @@ main { flex:1; display:flex; min-height:0; }
 .ligne { display:flex; align-items:center; gap:10px; padding:8px;
   border-bottom:1px solid var(--border); }
 .ligne:hover { background:var(--hover); }
+.ligne.actif { background:var(--hover); outline:2px solid var(--accent); outline-offset:-2px; }
 .ico { display:inline-flex; align-items:center; flex-shrink:0; color:var(--muted); }
 .ico svg { display:block; }
 .ligne.dossier .ico { color:var(--accent); }
@@ -241,6 +242,7 @@ function rendreFil(arbre, cible) {
 
 // ── Vue liste du dossier courant ────────────────────────────────────────────
 function rendreListe(arbre, cible) {
+  selection = -1;
   elExplorateur.innerHTML = "";
   elExplorateur.appendChild(rendreFil(arbre, cible));
   const enfants = tri(cible.enfants);
@@ -327,6 +329,7 @@ function rechercher(arbre, q) {
 
 // ── Vue « récemment ajoutés » (fenêtre glissante de N jours) ────────────────
 function rendreRecents(arbre) {
+  selection = -1;
   elExplorateur.innerHTML = "";
   const barre = document.createElement("div");
   barre.className = "fil";
@@ -414,6 +417,47 @@ document.getElementById("theme").onclick = () => {
 if (localStorage.getItem("cdp-theme") === "dark")
   document.documentElement.setAttribute("data-theme", "dark");
 
+function lignesVisibles() {
+  return Array.from(elExplorateur.querySelectorAll("a.ligne"));
+}
+function surligner(i) {
+  const lignes = lignesVisibles();
+  if (!lignes.length) { selection = -1; return; }
+  selection = Math.max(0, Math.min(i, lignes.length - 1));
+  lignes.forEach((l, k) => l.classList.toggle("actif", k === selection));
+  lignes[selection].scrollIntoView({block: "nearest"});
+}
+function remonter() {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  const segs = hash.split("/");
+  if (segs.length <= 1) return;                 // déjà à la racine de la classe
+  segs.pop();
+  location.hash = segs.map(encodeURIComponent).join("/");
+}
+function classeSuivante() {
+  if (classesDispo.length <= 1) return;
+  const i = classesDispo.indexOf(elClasse.value);
+  location.hash = encodeURIComponent(classesDispo[(i + 1) % classesDispo.length]);
+}
+document.addEventListener("keydown", (e) => {
+  const dansRecherche = document.activeElement === elRecherche;
+  if (e.key === "/") {
+    if (!dansRecherche) { e.preventDefault(); elRecherche.focus(); }
+    return;
+  }
+  if (e.key === "Escape") { elRecherche.value = ""; naviguer(); elRecherche.blur(); return; }
+  if (e.key === "ArrowDown") { e.preventDefault(); surligner(selection + 1); return; }
+  if (e.key === "ArrowUp")   { e.preventDefault(); surligner(selection - 1); return; }
+  if (e.key === "Enter") {
+    const lignes = lignesVisibles();
+    if (selection >= 0 && lignes[selection]) { e.preventDefault(); lignes[selection].click(); }
+    return;
+  }
+  if (dansRecherche) return;                    // les lettres servent à taper
+  if (e.key === "ArrowLeft" || e.key === "Backspace") { e.preventDefault(); remonter(); return; }
+  if (e.key === "t") { document.getElementById("theme").click(); return; }
+  if (e.key === "c") { classeSuivante(); return; }
+});
 init();
 </script>
 </body>
