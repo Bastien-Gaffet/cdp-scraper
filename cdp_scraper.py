@@ -690,6 +690,117 @@ def executer_reprise(session, dossier: Path, delai: float):
     print()
 
 
+def _afficher_resume_classe(simulation, compteur, volume, plan, dossier):
+    print()
+    print(gras("─── RÉSUMÉ " + "─" * 40))
+    if simulation:
+        print(f"  À télécharger : {gras(str(compteur['simulation']))}")
+        print(f"  Volume estimé : {gras(fmt_taille(volume['simulation']))}")
+        print(f"  À jour (ignorés) : {dim(str(len(plan['a_jour'])))}")
+        print(jaune("  (mode simulation — relancez sans --simulation pour télécharger)"))
+    else:
+        print(f"  Nouveaux / mis à jour : {vert(str(compteur['ok']))}   ({fmt_taille(volume['ok'])})")
+        print(f"  À jour (ignorés)      : {dim(str(len(plan['a_jour'])))}")
+        if compteur["echec"]:
+            print(f"  Échecs                : {rouge(str(compteur['echec']))}   (relançables avec --reprise)")
+        if plan["disparus"]:
+            print(f"  Disparus du serveur   : {jaune(str(len(plan['disparus'])))}   (fichiers conservés)")
+        print(f"\n  Fichiers dans : {cyan(str(dossier.resolve()))}")
+    print()
+
+
+def traiter_classe(cfg: dict, args, mdp: str, simulation: bool) -> dict:
+    """Traite une classe de bout en bout. `cfg` = {nom, url, login, dossier}
+    (sans mot de passe). Renvoie un résumé agrégeable :
+    {nom, ok, compteur, volume}."""
+    nom_classe = cfg["nom"]
+    url = cfg["url"]
+    print(gras(cyan(f"\n── Classe : {nom_classe} ──")))
+    print(f"Connexion à {cyan(url)} …")
+    session = creer_session()
+    ok, message = connexion(session, url, cfg["login"], mdp)
+    if not ok:
+        print(rouge(f"Connexion échouée : {message}"))
+        print(jaune("Vérifiez l'URL de la classe, l'identifiant et le mot de passe."))
+        return {"nom": nom_classe, "ok": False, "compteur": {}, "volume": {}}
+    print(vert("Connexion réussie."))
+
+    dossier = Path(cfg["dossier"]) / nom_classe
+
+    if args.reprise:
+        executer_reprise(session, dossier, args.delai)
+        return {"nom": nom_classe, "ok": True, "compteur": {}, "volume": {}}
+
+    prof = "illimitée" if args.profondeur is None else args.profondeur
+    print(f"\nExploration des documents (profondeur {prof}) …")
+    documents = crawler(session, url, args.profondeur, args.delai)
+
+    if not args.sans_colles:
+        colles = crawler_progcolles(session, url)
+        if colles:
+            fusion = {d["id"]: d for d in documents}
+            ajoutes = 0
+            for d in colles:
+                if d["id"] not in fusion:
+                    fusion[d["id"]] = d
+                    ajoutes += 1
+            documents = list(fusion.values())
+            print(dim(f"  + {ajoutes} élément(s) de programmes de colles"))
+
+    if not documents:
+        print(jaune("\nAucun document trouvé."))
+        print(jaune("La classe n'a peut-être pas de documents accessibles avec ce compte."))
+        return {"nom": nom_classe, "ok": True, "compteur": {}, "volume": {}}
+
+    print(f"\n{gras(str(len(documents)))} document(s) trouvé(s).")
+
+    try:
+        manifeste = cdp_manifeste.charger(dossier)
+    except cdp_manifeste.ManifesteVersionFuture as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+    plan = cdp_manifeste.planifier(documents, manifeste, dossier, complet=args.complet)
+    a_faire = plan["nouveau"] + plan["modifie"] + plan["a_reprendre"]
+    a_faire.sort(key=lambda d: (d.get("chemin", ""), d["nom"]))
+
+    print(f"  {gras(str(len(plan['nouveau'])))} nouveau(x), "
+          f"{gras(str(len(plan['modifie'])))} mis à jour, "
+          f"{gras(str(len(plan['a_reprendre'])))} à reprendre, "
+          f"{dim(str(len(plan['a_jour'])) + ' à jour')}.\n")
+
+    if not simulation:
+        dossier.mkdir(parents=True, exist_ok=True)
+        print(f"Destination : {gras(str(dossier.resolve()))}\n")
+
+    total = len(a_faire)
+    compteur = {"ok": 0, "echec": 0, "simulation": 0}
+    volume = {"ok": 0, "simulation": 0}
+    for i, doc in enumerate(a_faire, 1):
+        statut, taille, nom = telecharger(session, doc, dossier, simulation, i, total)
+        compteur[statut] = compteur.get(statut, 0) + 1
+        if statut in volume:
+            volume[statut] += taille
+        if not simulation:
+            erreur = "échec de téléchargement" if statut == "echec" else None
+            cdp_manifeste.maj_entree(manifeste, doc, statut, nom, taille,
+                                     datetime.now().isoformat(timespec="seconds"),
+                                     erreur=erreur)
+        if not simulation and args.delai:
+            time.sleep(args.delai)
+
+    if not simulation:
+        cdp_manifeste.marquer_disparus(manifeste, plan["disparus"])
+        manifeste["version"] = cdp_manifeste.VERSION
+        manifeste["classe"] = nom_classe
+        manifeste["url"] = url
+        manifeste["derniere_synchro"] = datetime.now().isoformat(timespec="seconds")
+        cdp_manifeste.enregistrer(dossier, manifeste)
+
+    _afficher_resume_classe(simulation, compteur, volume, plan, dossier)
+    return {"nom": nom_classe, "ok": True, "compteur": compteur, "volume": volume}
+
+
 def main():
     args = parse_args()
 

@@ -444,5 +444,42 @@ class TestIndicesMenu(unittest.TestCase):
         self.assertEqual(cdp_scraper._indices_menu("0,4,a,2", 3), [1])
 
 
+import types
+
+class TestTraiterClasse(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dossier = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _args(self):
+        return types.SimpleNamespace(reprise=False, complet=False, sans_colles=True,
+                                     profondeur=None, delai=0.0)
+
+    def test_connexion_echouee_resume_ko(self):
+        cfg = {"nom": "mpsi", "url": "https://x/mpsi", "login": "a", "dossier": self.dossier}
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(False, "401")):
+            resume = cdp_scraper.traiter_classe(cfg, self._args(), "secret", True)
+        self.assertFalse(resume["ok"])
+        self.assertEqual(resume["nom"], "mpsi")
+
+    def test_simulation_compte_les_documents(self):
+        cfg = {"nom": "mpsi", "url": "https://x/mpsi", "login": "a", "dossier": self.dossier}
+        doc = {"id": "1", "nom": "a.pdf", "url": "u", "chemin": "", "type": "pdf"}
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(True, "ok")), \
+             mock.patch.object(cdp_scraper, "crawler", return_value=[doc]), \
+             mock.patch.object(cdp_scraper, "telecharger",
+                               return_value=("simulation", 10, "a.pdf")) as tele:
+            resume = cdp_scraper.traiter_classe(cfg, self._args(), "secret", True)
+        self.assertTrue(resume["ok"])
+        self.assertEqual(resume["compteur"]["simulation"], 1)
+        tele.assert_called_once()
+        self.assertEqual(list(Path(self.dossier).glob("**/.cdp-manifest.json")), [])
+
+
 if __name__ == "__main__":
     unittest.main()
