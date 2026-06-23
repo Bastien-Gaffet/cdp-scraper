@@ -89,5 +89,23 @@ class TestMutations(unittest.TestCase):
         self.assertFalse(cdp_config.contient(c, "pcsi"))
 
 
+class TestSelectionner(unittest.TestCase):
+    def _config(self):
+        c = cdp_config._vide()
+        for n in ("mpsi", "pcsi"):
+            c["classes"].append({"nom": n, "url": "u", "login": "l", "dossier": "d"})
+        return c
+
+    def test_selection_ordre_des_noms(self):
+        c = self._config()
+        choisies = cdp_config.selectionner(c, ["pcsi", "mpsi"])
+        self.assertEqual([x["nom"] for x in choisies], ["pcsi", "mpsi"])
+
+    def test_nom_inconnu_leve(self):
+        c = self._config()
+        with self.assertRaises(cdp_config.ClasseInconnue):
+            cdp_config.selectionner(c, ["mpsi", "terminale"])
+
+
 if __name__ == "__main__":
     unittest.main()

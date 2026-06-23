@@ -79,3 +79,17 @@ def lister(config: dict) -> list:
 def retirer(config: dict, nom: str) -> dict:
     config["classes"] = [c for c in config.get("classes", []) if c.get("nom") != nom]
     return config
+
+
+def selectionner(config: dict, noms: list) -> list:
+    """Renvoie les entrées correspondant à `noms`, dans cet ordre. Lève
+    ClasseInconnue (en listant les noms disponibles) si l'une manque."""
+    par_nom = {c.get("nom"): c for c in config.get("classes", [])}
+    choisies = []
+    for nom in noms:
+        if nom not in par_nom:
+            dispo = ", ".join(sorted(n for n in par_nom if n)) or "(aucune)"
+            raise ClasseInconnue(
+                f"Classe inconnue : {nom!r}. Disponibles : {dispo}")
+        choisies.append(par_nom[nom])
+    return choisies
