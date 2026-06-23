@@ -419,5 +419,13 @@ class TestPageErreur(unittest.TestCase):
         self.assertIn("Erreur", cdp_viewer.page_erreur(418, "zzz").decode("utf-8"))
 
 
+class TestRechercheAmelioree(unittest.TestCase):
+    def test_helpers_recherche_presents(self):
+        self.assertIn('normalize("NFD")', cdp_viewer.PAGE_HTML)
+        self.assertIn("function sansAccents", cdp_viewer.PAGE_HTML)
+        self.assertIn("function dossierParent", cdp_viewer.PAGE_HTML)
+        self.assertIn('class="chemin"', cdp_viewer.PAGE_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()

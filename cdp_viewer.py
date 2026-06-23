@@ -83,6 +83,7 @@ main { flex:1; display:flex; min-height:0; }
 .ligne.dossier .nom { font-weight:600; }
 .ligne .meta { color:var(--muted); font-size:12px; margin-left:auto; flex-shrink:0;
   padding-left:12px; }
+.ligne .nom .chemin { color:var(--muted); font-size:12px; margin-left:8px; }
 .vide { color:var(--muted); padding:24px 0; }
 #theme { display:inline-flex; align-items:center; }
 .fil a, .fil .courant { display:inline-flex; align-items:center; gap:4px; }
@@ -108,6 +109,7 @@ const elRecherche = document.getElementById("recherche");
 let arbres = {};          // cache : nom de classe -> nœud racine
 let classesDispo = [];
 let fenetreRecents = 30;   // jours
+let selection = -1;   // index dans la liste courante (navigation clavier)
 
 // Icônes SVG (suivent la couleur du texte, sans emoji).
 const ICONES = {
@@ -282,6 +284,13 @@ function rendreRubriques(arbre, cible) {
 }
 
 // ── Recherche (tous les documents de la classe par nom) ─────────────────────
+function sansAccents(s) {
+  return s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+function dossierParent(chemin) {
+  const i = chemin.lastIndexOf("/");
+  return i < 0 ? "" : chemin.slice(0, i);
+}
 function collecter(noeud, acc) {
   (noeud.enfants || []).forEach(e => {
     if (e.type === "dossier") collecter(e, acc); else acc.push(e);
@@ -289,11 +298,13 @@ function collecter(noeud, acc) {
   return acc;
 }
 function rechercher(arbre, q) {
+  selection = -1;
   elExplorateur.innerHTML = "";
   const fil = document.createElement("div"); fil.className = "fil";
   fil.textContent = "Résultats pour « " + q + " »";
   elExplorateur.appendChild(fil);
-  const trouves = collecter(arbre, []).filter(f => f.nom.toLowerCase().includes(q));
+  const nq = sansAccents(q);
+  const trouves = collecter(arbre, []).filter(f => sansAccents(f.nom).includes(nq));
   if (!trouves.length) {
     const v = document.createElement("div"); v.className = "vide";
     v.textContent = "Aucun document ne correspond.";
@@ -302,7 +313,15 @@ function rechercher(arbre, q) {
   }
   const liste = document.createElement("div"); liste.className = "liste";
   trouves.sort((a, b) => a.nom.localeCompare(b.nom, "fr", {sensitivity:"base"}))
-         .forEach(f => liste.appendChild(ligne(f)));
+         .forEach(f => {
+           const l = ligne(f);
+           const parent = dossierParent(f.chemin);
+           if (parent) {
+             l.querySelector(".nom").insertAdjacentHTML(
+               "beforeend", '<span class="chemin">' + parent.replace(/</g, "&lt;") + "</span>");
+           }
+           liste.appendChild(l);
+         });
   elExplorateur.appendChild(liste);
 }
 
