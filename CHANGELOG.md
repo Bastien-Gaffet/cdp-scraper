@@ -7,6 +7,23 @@ et le projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 La version est unique pour l'ensemble du projet : `cdp_scraper.py` et
 `cdp_viewer.py` portent le même numéro et sont publiés ensemble.
 
+## [1.3.0] - 2026-06-23
+
+### Ajouté
+- **Multi-classes en un run** : traitez plusieurs classes d'affilée, par menu
+  interactif ou en passant leurs noms en argument (`cdp_scraper.py mpsi pcsi`).
+- **Config mémorisée** : un fichier `.cdp-scraper/config.json` retient
+  url / login / dossier de chaque classe (jamais le mot de passe, redemandé à
+  chaque run). Résolution en cascade : dossier courant puis dossier personnel.
+  Commandes `--config-lister`, `--config-supprimer NOM`, `--tout`, `--config CHEMIN`.
+- **Viewer — pages d'erreur soignées** : 404/403/500 affichent une page thémée
+  (clair/sombre) avec un message contextuel et un retour à l'accueil.
+- **Viewer — navigation clavier** : flèches pour parcourir, Entrée pour ouvrir,
+  ← / Retour arrière pour remonter, `/` pour chercher, Échap pour effacer,
+  `t` (thème) et `c` (classe suivante).
+- **Viewer — recherche améliorée** : insensible aux accents et affiche le
+  dossier de chaque résultat.
+
 ## [1.2.0] - 2026-06-22
 
 ### Ajouté

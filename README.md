@@ -98,6 +98,22 @@ python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe --simulation
 Les documents sont rangés dans `<dossier>/<nom-de-la-classe>/`, en respectant
 l'arborescence exacte du site.
 
+Principaux arguments :
+
+| Argument | Description |
+|----------|-------------|
+| `--url URL` | URL de la classe sur cahier-de-prepa.fr |
+| `--login NOM` | Identifiant / email de connexion |
+| `-s / --sortie DIR` | Dossier de destination (défaut : `cours_cdp`) |
+| `--simulation` | Lister les documents sans télécharger |
+| `--complet` | Ignorer le manifeste et tout re-télécharger |
+| `--reprise` | Reprendre uniquement les téléchargements en échec |
+| `CLASSE...` | Noms de classes mémorisées à traiter (toutes / menu si aucun). |
+| `--config CHEMIN` | Chemin du fichier de config (défaut : `.cdp-scraper/config.json`). |
+| `--tout` | Traiter toutes les classes mémorisées, sans menu. |
+| `--config-lister` | Afficher les classes mémorisées puis quitter. |
+| `--config-supprimer NOM` | Retirer une classe de la config puis quitter. |
+
 ### 🔄 Synchronisation intelligente
 
 Relancer `cdp_scraper.py` sur une classe déjà téléchargée ne retélécharge que
@@ -117,6 +133,23 @@ python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe -s ./cours --re
 
 Dans le visualiseur, chaque fichier affiche sa **date d'ajout** et une vue
 **« Récemment ajoutés »** regroupe les documents récents (7 / 30 / 90 jours).
+
+### ⚙️ Config mémorisée et multi-classes
+
+Après un téléchargement interactif réussi, le scraper propose de **mémoriser**
+la classe (URL, identifiant, dossier — **jamais le mot de passe**). Les classes
+mémorisées sont relançables par leur nom :
+
+```bash
+python cdp_scraper.py              # menu : choisir les classes à mettre à jour
+python cdp_scraper.py mpsi pcsi    # seulement ces classes
+python cdp_scraper.py --tout       # toutes, sans menu
+python cdp_scraper.py --config-lister
+```
+
+Le fichier de config est cherché dans `./.cdp-scraper/config.json` (s'il existe),
+sinon dans `~/.cdp-scraper/config.json`. Le **mot de passe n'est jamais stocké**
+et reste demandé à chaque lancement (un par classe).
 
 📖 **Documentation complète** (tous les arguments, fonctionnement du crawl,
 programmes de colles, mode simulation) : [docs/cdp_scraper_doc.md](docs/cdp_scraper_doc.md).
