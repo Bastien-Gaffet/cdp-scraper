@@ -505,6 +505,22 @@ def demander_oui_non(question: str, defaut: bool = False) -> bool:
     return rep in ("o", "oui", "y", "yes")
 
 
+def _indices_menu(saisie: str, total: int) -> list:
+    """Convertit une saisie de menu en indices 0-based valides.
+    '' ou 'tout' → tous ; '1,3' → [0,2]. Ignore hors-plage / non numérique /
+    doublons (en conservant l'ordre de saisie)."""
+    s = saisie.strip().lower()
+    if s == "" or s == "tout":
+        return list(range(total))
+    indices = []
+    for morceau in s.replace(" ", "").split(","):
+        if morceau.isdigit():
+            i = int(morceau) - 1
+            if 0 <= i < total and i not in indices:
+                indices.append(i)
+    return indices
+
+
 def normaliser_url(url: str) -> str:
     url = url.strip()
     if not url.startswith(("http://", "https://")):

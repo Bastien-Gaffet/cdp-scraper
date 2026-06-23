@@ -427,5 +427,22 @@ class TestArgsConfig(unittest.TestCase):
         self.assertEqual(args.config_supprimer, "mpsi")
 
 
+class TestIndicesMenu(unittest.TestCase):
+    def test_vide_tous(self):
+        self.assertEqual(cdp_scraper._indices_menu("", 3), [0, 1, 2])
+
+    def test_tout_tous(self):
+        self.assertEqual(cdp_scraper._indices_menu("tout", 3), [0, 1, 2])
+
+    def test_liste(self):
+        self.assertEqual(cdp_scraper._indices_menu("1,3", 3), [0, 2])
+
+    def test_espaces_et_doublons_ignores(self):
+        self.assertEqual(cdp_scraper._indices_menu("2, 2 , 1", 3), [1, 0])
+
+    def test_hors_plage_et_non_numerique_ignores(self):
+        self.assertEqual(cdp_scraper._indices_menu("0,4,a,2", 3), [1])
+
+
 if __name__ == "__main__":
     unittest.main()
