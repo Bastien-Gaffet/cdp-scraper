@@ -35,7 +35,7 @@ import cdp_manifeste
 import cdp_config
 from urllib.parse import urljoin, urlsplit, unquote
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
 
