@@ -40,6 +40,12 @@ class TestColoration(unittest.TestCase):
         out = cdp_coloration.colorier(src, "c")
         self.assertEqual(_detag(out), src)
 
+    def test_preservation_avec_caracteres_html(self):
+        src = "if (a < b && c > d) return 1;\n"
+        out = cdp_coloration.colorier(src, "c")
+        import html as _h
+        self.assertEqual(_detag(out), _h.escape(src, quote=False))
+
     def test_echappement_html(self):
         out = cdp_coloration.colorier("a < b && c > d", "c")
         self.assertIn("&lt;", out)

@@ -87,7 +87,12 @@ def _regex_pour(spec):
 
     Ordre = priorité : commentaire bloc, commentaire ligne, chaîne, nombre,
     identifiant. Tout le reste (espaces, ponctuation) tombe dans les intervalles
-    entre correspondances et est émis tel quel (échappé)."""
+    entre correspondances et est émis tel quel (échappé).
+
+    Limitations assumées pour v1.4 (le texte source reste toujours préservé) :
+    - commentaires OCaml imbriqués `(* (* *) *)` non gérés (un simple .*? non
+      glouton s'arrête au premier `*)`) ;
+    - littéraux hexadécimaux (0x...) et chaînes multilignes non colorés."""
     parties = []
     if spec.commentaire_bloc:
         o, f = spec.commentaire_bloc
@@ -109,8 +114,9 @@ def _regex_pour(spec):
 def colorier(source, langage):
     """Rend `source` en HTML coloré pour `langage`, ou None si langage inconnu.
 
-    Garantit que le rendu, balises retirées, reproduit exactement `source`
-    (chaque tranche est émise telle quelle après échappement HTML)."""
+    Garantit que le rendu, balises retirées, reproduit exactement
+    `html.escape(source, quote=False)` (chaque tranche est émise après
+    échappement HTML)."""
     spec = LANGAGES.get(langage)
     if spec is None:
         return None
@@ -136,6 +142,7 @@ def colorier(source, langage):
             out.append('<span class="kw">%s</span>' % esc
                        if cle in spec.mots_cles else esc)
         else:
+            # filet de sécurité : ne devrait pas arriver
             out.append(esc)
         pos = m.end()
     if pos < len(source):
