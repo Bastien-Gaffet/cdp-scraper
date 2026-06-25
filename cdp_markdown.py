@@ -15,15 +15,15 @@ import posixpath
 import re
 import urllib.parse
 
-import cdp_coloration
+import cdp_coloration  # utilisé par convertir (blocs de code colorés), ajouté à la Task 3
 
 VERSION = 1
 
 _SCHEMES_OK = ("http://", "https://")
 
 _CODE = re.compile(r"`([^`]+)`")
-_IMG = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
-_LIEN = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+_IMG = re.compile(r"!\[([^\]\n]*)\]\(([^)\s]+)\)")
+_LIEN = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
 _GRAS = re.compile(r"(\*\*|__)(.+?)\1")
 _ITAL = re.compile(r"(?<![\w*])(\*|_)(?!\s)(.+?)(?<!\s)\1(?![\w*])")
 
@@ -32,8 +32,9 @@ def _url_sure(url, prefixe_url):
     """URL sûre pour href/src, ou None à neutraliser.
 
     - http:// et https:// : conservées.
-    - chemin relatif : résolu sous `prefixe_url` (dossier du .md) et confiné à
-      l'arborescence /file/ ; tout ce qui en sort renvoie None.
+    - chemin relatif : résolu et confiné sous `prefixe_url` (dossier du .md) ;
+      tout ce qui en sort renvoie None. C'est l'appelant qui garantit que
+      `prefixe_url` pointe sous l'arborescence /file/.
     - tout le reste (javascript:, data:, //, mailto:, ancre #, absolu) : None.
     """
     u = url.strip()
@@ -63,6 +64,7 @@ def rendre_inline(texte, prefixe_url=""):
     sûrs (\\x00 n \\x00), on échappe tout le texte restant, on applique l'emphase,
     puis on réinjecte les jetons. L'emphase ne peut donc pas pénétrer le code ni
     casser une balise déjà générée."""
+    texte = texte.replace("\x00", "")   # neutralise toute forge de jeton (\x00 n \x00)
     jetons = []
 
     def _placer(html_sur):

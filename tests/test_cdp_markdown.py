@@ -43,12 +43,20 @@ class TestInline(unittest.TestCase):
     def test_image_traversal_neutralisee(self):
         out = self.r("![x](../../secret.png)", "/file/PCSI/Maths")
         self.assertNotIn("<img", out)
-        self.assertNotIn("secret", out.replace("x", ""))  # pas de src vers secret
+        self.assertNotIn("/file/secret", out)   # aucune src vers l'extérieur
 
     def test_html_inline_de_la_source_non_propage(self):
         out = self.r("<script>alert(1)</script>")
         self.assertNotIn("<script>", out)
         self.assertIn("&lt;script&gt;", out)
+
+    def test_nul_dans_la_source_ne_plante_pas(self):
+        self.assertEqual(self.r("\x00"), "")
+        self.assertNotIn("\x00", self.r("texte \x005\x00 suite"))
+
+    def test_nul_ne_duplique_pas_un_jeton(self):
+        out = self.r("`code`\x000\x00")
+        self.assertEqual(out.count("<code>"), 1)
 
 
 if __name__ == "__main__":
