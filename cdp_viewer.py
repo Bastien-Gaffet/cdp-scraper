@@ -24,8 +24,10 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 import cdp_manifeste
+import cdp_coloration
+import cdp_markdown
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 PAGE_HTML = r"""<!doctype html>
 <html lang="fr">
@@ -139,6 +141,10 @@ function urlOuvrir(c) {   // .ggb : GeoGebra en ligne (repli appli PC / explorat
 function urlCode(c) {     // .py : affichage du code colorisé (pleine page)
   return "/code/" + c.split("/").map(encodeURIComponent).join("/");
 }
+function urlRendu(c) {    // .md : Markdown rendu, pleine page
+  return "/rendu/" + c.split("/").map(encodeURIComponent).join("/");
+}
+const CODABLES = new Set(["py","c","cpp","java","sql","r","ml","json"]);
 
 function octets(n) {
   if (n < 1024) return n + " o";
@@ -193,8 +199,11 @@ function ligne(noeud) {
     a.href = urlOuvrir(noeud.chemin);                    // GeoGebra en ligne, nouvel onglet
     a.target = "_blank"; a.rel = "noopener";
     a.title = "Ouvrir dans GeoGebra (en ligne) — repli : application installée, sinon explorateur";
-  } else if (ext === "py") {
-    a.href = urlCode(noeud.chemin);                      // code Python colorisé, pleine page
+  } else if (ext === "md" || ext === "markdown") {
+    a.href = urlRendu(noeud.chemin);                     // Markdown rendu, pleine page
+    a.title = "Afficher le document formaté";
+  } else if (CODABLES.has(ext)) {
+    a.href = urlCode(noeud.chemin);                      // code colorisé, pleine page
     a.title = "Afficher le code (coloré)";
   } else if (VISIONNABLES.has(ext)) {
     a.href = urlFichier(noeud.chemin);                   // ouverture pleine page
@@ -580,6 +589,7 @@ if (localStorage.getItem("cdp-theme") === "dark")
 const LANCER = __LANCER__;
 const btn = document.getElementById("lancer");
 const etat = document.getElementById("etat");
+if (!LANCER) btn.style.display = "none";
 btn.onclick = async () => {
   btn.disabled = true; etat.textContent = "Lancement…";
   try {
@@ -595,6 +605,65 @@ btn.onclick = async () => {
     btn.disabled = false;
   }
 };
+</script>
+</body>
+</html>"""
+
+
+# Page d'affichage d'un Markdown rendu (V2). __CORPS__ est déjà du HTML sûr
+# produit par cdp_markdown.convertir. Style aligné sur le thème du viewer.
+PAGE_RENDU = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITRE__</title>
+<style>
+:root{ --bg:#fbfbfc; --txt:#1d1d1f; --panel:#fff; --border:#e3e3e6;
+  --lien:#2563eb; --code:#f0f0f3; --com:#a0a1a7; }
+[data-theme="dark"]{ --bg:#16171a; --txt:#e7e7ea; --panel:#1f2024;
+  --border:#2c2d33; --lien:#6ea0ff; --code:#26272c; --com:#7f848e; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+  font:16px/1.65 system-ui,sans-serif}
+header{position:sticky;top:0;z-index:1;background:var(--panel);
+  border-bottom:1px solid var(--border);padding:8px 14px;
+  font:13px/1.4 system-ui,sans-serif;display:flex;align-items:center;gap:12px}
+header .titre{font-weight:600}
+header .grow{flex:1}
+a.bouton{font:inherit;color:var(--txt);background:var(--bg);text-decoration:none;
+  border:1px solid var(--border);border-radius:8px;padding:5px 12px}
+a.bouton:hover{border-color:var(--lien)}
+main{max-width:46rem;margin:0 auto;padding:24px 20px}
+main a{color:var(--lien)}
+h1,h2,h3,h4{line-height:1.25;margin:1.4em 0 .5em}
+pre{background:var(--code);border:1px solid var(--border);border-radius:8px;
+  padding:12px 14px;overflow:auto;font:13px/1.5 ui-monospace,"Consolas",monospace}
+code{background:var(--code);border-radius:4px;padding:.1em .3em;
+  font:.9em ui-monospace,"Consolas",monospace}
+pre code{background:none;padding:0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--border);
+  color:var(--com)}
+img{max-width:100%;height:auto}
+table{border-collapse:collapse;margin:1em 0}
+th,td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+hr{border:none;border-top:1px solid var(--border);margin:1.6em 0}
+.kw{color:#a626a4}.str{color:#50a14f}.com{color:var(--com);font-style:italic}.num{color:#986801}
+[data-theme="dark"] .kw{color:#c678dd}[data-theme="dark"] .str{color:#98c379}
+[data-theme="dark"] .num{color:#d19a66}
+</style>
+</head>
+<body>
+<header>
+  <span class="titre">__TITRE__</span>
+  <span class="grow"></span>
+  <a class="bouton" id="source" href="#">Voir la source</a>
+</header>
+<main>__CORPS__</main>
+<script>
+if (localStorage.getItem("cdp-theme") === "dark")
+  document.documentElement.setAttribute("data-theme", "dark");
+document.getElementById("source").href = __SOURCE__;
 </script>
 </body>
 </html>"""
@@ -1023,7 +1092,28 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
                                  "text/html; charset=utf-8", cache=False)
             return
 
-        if chemin.startswith("/code/"):                   # .py -> code colorise
+        if chemin.startswith("/rendu/"):                  # .md -> Markdown rendu
+            rel = urllib.parse.unquote(chemin[len("/rendu/"):])
+            cible = resoudre_dans_racine(racine, rel)
+            if cible is None:
+                self._erreur(403, "acces")
+                return
+            if not cible.is_file():
+                self._erreur(404, "fichier")
+                return
+            source = cible.read_text(encoding="utf-8", errors="replace")
+            enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
+            prefixe = "/file/" + "/".join(enc.split("/")[:-1])
+            corps = cdp_markdown.convertir(source, prefixe, colorier_python)
+            page = (PAGE_RENDU
+                    .replace("__TITRE__", html.escape(cible.name))
+                    .replace("__CORPS__", corps)
+                    .replace("__SOURCE__", json.dumps("/file/" + enc)))
+            self._envoyer_octets(200, page.encode("utf-8"),
+                                 "text/html; charset=utf-8", cache=False)
+            return
+
+        if chemin.startswith("/code/"):                   # code colorisé
             rel = urllib.parse.unquote(chemin[len("/code/"):])
             cible = resoudre_dans_racine(racine, rel)
             if cible is None:
@@ -1033,17 +1123,24 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
                 self._erreur(404, "fichier")
                 return
             source = cible.read_text(encoding="utf-8", errors="replace")
-            corps = colorier_python(source)
-            if corps is None:                             # non tokenisable : texte brut
+            ext = cible.suffix.lstrip(".").lower()
+            if ext == "py":
+                corps = colorier_python(source)
+            elif ext in cdp_coloration.LANGAGES:
+                corps = cdp_coloration.colorier(source, ext)
+            else:
+                corps = None
+            if corps is None:                             # repli : texte brut
                 corps = html.escape(source)
             n = max(1, len(source.splitlines()))
             gouttiere = "\n".join(str(i) for i in range(1, n + 1))
             enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
+            lancer = "/lancer/" + enc if ext == "py" else None
             page = (PAGE_CODE
                     .replace("__TITRE__", html.escape(cible.name))
                     .replace("__GOUTTIERE__", gouttiere)
                     .replace("__CORPS__", corps)
-                    .replace("__LANCER__", json.dumps("/lancer/" + enc)))
+                    .replace("__LANCER__", json.dumps(lancer)))
             self._envoyer_octets(200, page.encode("utf-8"),
                                  "text/html; charset=utf-8", cache=False)
             return
