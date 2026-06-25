@@ -170,7 +170,7 @@ def _table(lignes, i, n, prefixe_url):
     return "".join(out), i
 
 
-def convertir(source, prefixe_url="", colorier_python=None):
+def convertir(source, prefixe_url="", colorier_python=None, _profondeur=0):
     """Convertit `source` (Markdown) en HTML sûr.
 
     `prefixe_url` : URL du dossier du .md (pour résoudre images/liens relatifs).
@@ -213,12 +213,19 @@ def convertir(source, prefixe_url="", colorier_python=None):
             continue
 
         if _CITATION.match(ligne):
+            if _profondeur >= 20:
+                # Trop de niveaux imbriqués : on arrête de récurser (contenu non fiable).
+                texte_q = re.sub(r"^ {0,3}>\s?", "", ligne)
+                out.append("<p>%s</p>" % rendre_inline(texte_q, prefixe_url))
+                i += 1
+                continue
             bloc = []
             while i < n and _CITATION.match(lignes[i]):
                 bloc.append(re.sub(r"^ {0,3}>\s?", "", lignes[i]))
                 i += 1
             out.append("<blockquote>%s</blockquote>"
-                       % convertir("\n".join(bloc), prefixe_url, colorier_python))
+                       % convertir("\n".join(bloc), prefixe_url, colorier_python,
+                                   _profondeur + 1))
             continue
 
         if ("|" in ligne and i + 1 < n and _SEP_TABLE.match(lignes[i + 1])):
@@ -239,7 +246,9 @@ def convertir(source, prefixe_url="", colorier_python=None):
 
         para = []
         while (i < n and lignes[i].strip() != ""
-               and not _est_debut_bloc(lignes[i])):
+               and not _est_debut_bloc(lignes[i])
+               and not ("|" in lignes[i] and i + 1 < n
+                        and _SEP_TABLE.match(lignes[i + 1]))):
             para.append(lignes[i].strip())
             i += 1
         out.append("<p>%s</p>" % rendre_inline(" ".join(para), prefixe_url))

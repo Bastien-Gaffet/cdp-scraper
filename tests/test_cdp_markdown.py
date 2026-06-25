@@ -123,6 +123,30 @@ class TestBlocs(unittest.TestCase):
     def test_inline_dans_les_blocs(self):
         self.assertIn("<strong>x</strong>", self.c("# **x**"))
 
+    def test_entree_vide(self):
+        self.assertEqual(self.c(""), "")
+
+    def test_bloc_code_non_termine_a_la_fin(self):
+        out = self.c("```\na < b")          # pas de clôture
+        self.assertIn("a &lt; b", out)       # pas de crash, contenu échappé
+
+    def test_blockquotes_tres_profonds_ne_plantent_pas(self):
+        out = self.c("> " * 996 + "x")       # ne doit pas lever RecursionError
+        self.assertIn("x", out)
+
+    def test_table_sans_lignes_de_corps(self):
+        out = self.c("| a | b |\n| - | - |")
+        self.assertIn("<th>a</th>", out)     # en-tête seul, pas de crash
+
+    def test_table_apres_paragraphe_sans_ligne_vide(self):
+        out = self.c("texte\n| a | b |\n| - | - |\n| 1 | 2 |")
+        self.assertIn("<table>", out)
+        self.assertIn("<td>1</td>", out)
+
+    def test_echappement_dans_cellule_et_titre(self):
+        self.assertIn("&lt;script&gt;", self.c("# <script>"))
+        self.assertIn("&lt;script&gt;", self.c("| <script> |\n| - |\n| x |"))
+
 
 if __name__ == "__main__":
     unittest.main()
