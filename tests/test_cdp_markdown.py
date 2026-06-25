@@ -59,5 +59,70 @@ class TestInline(unittest.TestCase):
         self.assertEqual(out.count("<code>"), 1)
 
 
+class TestBlocs(unittest.TestCase):
+    def c(self, src, prefixe="", colorier_python=None):
+        return cdp_markdown.convertir(src, prefixe, colorier_python)
+
+    def test_titres(self):
+        out = self.c("# Titre\n\n## Sous-titre")
+        self.assertIn("<h1>Titre</h1>", out)
+        self.assertIn("<h2>Sous-titre</h2>", out)
+
+    def test_paragraphe(self):
+        out = self.c("Ligne un\nligne deux\n\nAutre para")
+        self.assertIn("<p>Ligne un ligne deux</p>", out)
+        self.assertIn("<p>Autre para</p>", out)
+
+    def test_regle_horizontale(self):
+        self.assertIn("<hr>", self.c("a\n\n---\n\nb"))
+
+    def test_citation(self):
+        out = self.c("> citée\n> suite")
+        self.assertIn("<blockquote>", out)
+        self.assertIn("citée suite", out)
+
+    def test_liste_a_puces(self):
+        out = self.c("- un\n- deux")
+        self.assertIn("<ul>", out)
+        self.assertEqual(out.count("<li>"), 2)
+
+    def test_liste_numerotee(self):
+        self.assertIn("<ol>", self.c("1. un\n2. deux"))
+
+    def test_liste_imbriquee(self):
+        out = self.c("- un\n  - sous\n- deux")
+        self.assertIn("<ul><li>un<ul><li>sous</li></ul></li>", out)
+
+    def test_table_gfm(self):
+        out = self.c("| a | b |\n| - | - |\n| 1 | 2 |")
+        self.assertIn("<table>", out)
+        self.assertIn("<th>a</th>", out)
+        self.assertIn("<td>1</td>", out)
+
+    def test_bloc_code_sans_langage_echappe(self):
+        out = self.c("```\na < b\n```")
+        self.assertIn("<pre><code>", out)
+        self.assertIn("a &lt; b", out)
+        self.assertNotIn('class="kw"', out)
+
+    def test_bloc_code_langage_colore(self):
+        out = self.c("```c\nint x = 1;\n```")
+        self.assertIn('<span class="kw">int</span>', out)
+
+    def test_bloc_code_python_via_callback(self):
+        appels = []
+
+        def faux_python(code):
+            appels.append(code)
+            return '<span class="kw">import</span> os'
+
+        out = self.c("```python\nimport os\n```", colorier_python=faux_python)
+        self.assertEqual(appels, ["import os"])
+        self.assertIn('<span class="kw">import</span>', out)
+
+    def test_inline_dans_les_blocs(self):
+        self.assertIn("<strong>x</strong>", self.c("# **x**"))
+
+
 if __name__ == "__main__":
     unittest.main()

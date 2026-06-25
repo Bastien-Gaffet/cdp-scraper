@@ -100,3 +100,148 @@ def rendre_inline(texte, prefixe_url=""):
     texte = _ITAL.sub(lambda m: "<em>%s</em>" % m.group(2), texte)
     texte = re.sub(r"\x00(\d+)\x00", lambda m: jetons[int(m.group(1))], texte)
     return texte
+
+
+_ITEM = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
+_FENCE = re.compile(r"^ {0,3}(`{3,})(.*)$")
+_FENCE_FIN = re.compile(r"^ {0,3}`{3,}\s*$")
+_TITRE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+_HR = re.compile(r"^ {0,3}([-*_])(\s*\1){2,}\s*$")
+_CITATION = re.compile(r"^ {0,3}>")
+_SEP_TABLE = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$")
+
+
+def _est_debut_bloc(ligne):
+    return bool(_FENCE.match(ligne) or _TITRE.match(ligne)
+                or _CITATION.match(ligne) or _ITEM.match(ligne)
+                or _HR.match(ligne))
+
+
+def _bloc_code(code, lang, colorier_python):
+    cle = lang.strip().lower()
+    colore = None
+    if cle in ("py", "python") and colorier_python is not None:
+        colore = colorier_python(code)
+    elif cle in cdp_coloration.LANGAGES:
+        colore = cdp_coloration.colorier(code, cle)
+    corps = colore if colore is not None else html.escape(code)
+    return "<pre><code>%s</code></pre>" % corps
+
+
+def _rendre_liste(items, i, prefixe_url):
+    """Rend la sous-liste dont l'indentation == celle de items[i].
+    `items` : liste de (indent, ordonnee, contenu). Renvoie (html, i)."""
+    indent = items[i][0]
+    tag = "ol" if items[i][1] else "ul"
+    out = ["<%s>" % tag]
+    while i < len(items) and items[i][0] == indent:
+        contenu = rendre_inline(items[i][2], prefixe_url)
+        i += 1
+        if i < len(items) and items[i][0] > indent:
+            sous, i = _rendre_liste(items, i, prefixe_url)
+            out.append("<li>%s%s</li>" % (contenu, sous))
+        else:
+            out.append("<li>%s</li>" % contenu)
+    out.append("</%s>" % tag)
+    return "".join(out), i
+
+
+def _table(lignes, i, n, prefixe_url):
+    def cellules(l):
+        l = l.strip()
+        if l.startswith("|"):
+            l = l[1:]
+        if l.endswith("|"):
+            l = l[:-1]
+        return [c.strip() for c in l.split("|")]
+
+    out = ["<table><thead><tr>"]
+    for c in cellules(lignes[i]):
+        out.append("<th>%s</th>" % rendre_inline(c, prefixe_url))
+    out.append("</tr></thead><tbody>")
+    i += 2  # saute l'en-tête et la ligne de séparation
+    while i < n and lignes[i].strip() and "|" in lignes[i]:
+        out.append("<tr>")
+        for c in cellules(lignes[i]):
+            out.append("<td>%s</td>" % rendre_inline(c, prefixe_url))
+        out.append("</tr>")
+        i += 1
+    out.append("</tbody></table>")
+    return "".join(out), i
+
+
+def convertir(source, prefixe_url="", colorier_python=None):
+    """Convertit `source` (Markdown) en HTML sûr.
+
+    `prefixe_url` : URL du dossier du .md (pour résoudre images/liens relatifs).
+    `colorier_python` : callback optionnel (code -> HTML) pour les blocs ```python
+    — injecté par le viewer pour réutiliser son coloriseur tokenize."""
+    lignes = source.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    n = len(lignes)
+    out = []
+    i = 0
+    while i < n:
+        ligne = lignes[i]
+
+        m = _FENCE.match(ligne)
+        if m:
+            lang = m.group(2)
+            i += 1
+            corps = []
+            while i < n and not _FENCE_FIN.match(lignes[i]):
+                corps.append(lignes[i])
+                i += 1
+            i += 1  # saute la clôture (ou la fin du fichier)
+            out.append(_bloc_code("\n".join(corps), lang, colorier_python))
+            continue
+
+        if ligne.strip() == "":
+            i += 1
+            continue
+
+        m = _TITRE.match(ligne)
+        if m:
+            niv = len(m.group(1))
+            out.append("<h%d>%s</h%d>"
+                       % (niv, rendre_inline(m.group(2), prefixe_url), niv))
+            i += 1
+            continue
+
+        if _HR.match(ligne):
+            out.append("<hr>")
+            i += 1
+            continue
+
+        if _CITATION.match(ligne):
+            bloc = []
+            while i < n and _CITATION.match(lignes[i]):
+                bloc.append(re.sub(r"^ {0,3}>\s?", "", lignes[i]))
+                i += 1
+            out.append("<blockquote>%s</blockquote>"
+                       % convertir("\n".join(bloc), prefixe_url, colorier_python))
+            continue
+
+        if ("|" in ligne and i + 1 < n and _SEP_TABLE.match(lignes[i + 1])):
+            html_table, i = _table(lignes, i, n, prefixe_url)
+            out.append(html_table)
+            continue
+
+        if _ITEM.match(ligne):
+            items = []
+            while i < n and _ITEM.match(lignes[i]):
+                mi = _ITEM.match(lignes[i])
+                ordonnee = mi.group(2)[0] not in "-*+"
+                items.append((len(mi.group(1)), ordonnee, mi.group(3)))
+                i += 1
+            html_liste, _ = _rendre_liste(items, 0, prefixe_url)
+            out.append(html_liste)
+            continue
+
+        para = []
+        while (i < n and lignes[i].strip() != ""
+               and not _est_debut_bloc(lignes[i])):
+            para.append(lignes[i].strip())
+            i += 1
+        out.append("<p>%s</p>" % rendre_inline(" ".join(para), prefixe_url))
+
+    return "\n".join(out)
