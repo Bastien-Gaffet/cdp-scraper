@@ -166,5 +166,39 @@ class TestAjouterRecuperer(unittest.TestCase):
         self.assertNotIn("secretclasse", json.dumps(c))
 
 
+class TestRetirerContientLister(unittest.TestCase):
+    def _coffre(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "s1")
+        cdp_coffre.ajouter(c, "motmaitre", "pcsi", "s2")
+        return c
+
+    def test_contient(self):
+        c = self._coffre()
+        self.assertTrue(cdp_coffre.contient(c, "mpsi"))
+        self.assertFalse(cdp_coffre.contient(c, "inconnue"))
+
+    def test_contient_coffre_vide(self):
+        self.assertFalse(cdp_coffre.contient(cdp_coffre._vide(), "mpsi"))
+
+    def test_lister_ordre_alphabetique(self):
+        c = self._coffre()
+        self.assertEqual(cdp_coffre.lister(c), ["mpsi", "pcsi"])
+
+    def test_lister_coffre_vide(self):
+        self.assertEqual(cdp_coffre.lister(cdp_coffre._vide()), [])
+
+    def test_retirer(self):
+        c = self._coffre()
+        cdp_coffre.retirer(c, "mpsi")
+        self.assertFalse(cdp_coffre.contient(c, "mpsi"))
+        self.assertTrue(cdp_coffre.contient(c, "pcsi"))
+
+    def test_retirer_absent_ne_casse_pas(self):
+        c = self._coffre()
+        cdp_coffre.retirer(c, "inconnue")
+        self.assertEqual(len(cdp_coffre.lister(c)), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

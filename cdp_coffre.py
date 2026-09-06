@@ -166,3 +166,16 @@ def recuperer(coffre: dict, mdp_maitre: str, nom: str) -> str:
     cle = deverrouiller(coffre, mdp_maitre)
     clair = _dechiffrer(cle, nom.encode("utf-8"), coffre["entrees"][nom])
     return clair.decode("utf-8")
+
+
+def retirer(coffre: dict, nom: str) -> dict:
+    coffre.get("entrees", {}).pop(nom, None)
+    return coffre
+
+
+def contient(coffre: dict, nom: str) -> bool:
+    return nom in coffre.get("entrees", {})
+
+
+def lister(coffre: dict) -> list:
+    return sorted(coffre.get("entrees", {}))
