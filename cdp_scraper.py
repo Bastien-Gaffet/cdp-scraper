@@ -33,6 +33,7 @@ from pathlib import Path
 from datetime import datetime
 import cdp_manifeste
 import cdp_config
+import cdp_coffre
 from urllib.parse import urljoin, urlsplit, unquote
 
 __version__ = "1.3.0"
@@ -639,6 +640,16 @@ Exemples :
                    help="Afficher les classes mémorisées puis quitter")
     p.add_argument("--config-supprimer", metavar="NOM",
                    help="Retirer une classe de la config puis quitter")
+    p.add_argument("--coffre", metavar="CHEMIN",
+                   help="Chemin du fichier de coffre chiffré (défaut : .cdp-scraper/coffre.json)")
+    p.add_argument("--coffre-ajouter", metavar="NOM",
+                   help="Enregistrer le mot de passe d'une classe déjà mémorisée dans le coffre chiffré")
+    p.add_argument("--coffre-supprimer", metavar="NOM",
+                   help="Retirer le mot de passe d'une classe du coffre chiffré")
+    p.add_argument("--coffre-lister", action="store_true",
+                   help="Afficher les classes ayant un mot de passe dans le coffre puis quitter")
+    p.add_argument("--coffre-changer-mdp", action="store_true",
+                   help="Changer le mot de passe maître du coffre chiffré puis quitter")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
     return p.parse_args(argv)
 

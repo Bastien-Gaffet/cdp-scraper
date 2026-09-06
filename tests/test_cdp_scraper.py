@@ -427,6 +427,32 @@ class TestArgsConfig(unittest.TestCase):
         self.assertEqual(args.config_supprimer, "mpsi")
 
 
+class TestArgsCoffre(unittest.TestCase):
+    def test_coffre_chemin(self):
+        args = cdp_scraper.parse_args(["--coffre", "x.json"])
+        self.assertEqual(args.coffre, "x.json")
+
+    def test_coffre_defaut_none(self):
+        args = cdp_scraper.parse_args([])
+        self.assertIsNone(args.coffre)
+
+    def test_coffre_ajouter(self):
+        args = cdp_scraper.parse_args(["--coffre-ajouter", "mpsi"])
+        self.assertEqual(args.coffre_ajouter, "mpsi")
+
+    def test_coffre_supprimer(self):
+        args = cdp_scraper.parse_args(["--coffre-supprimer", "mpsi"])
+        self.assertEqual(args.coffre_supprimer, "mpsi")
+
+    def test_coffre_lister(self):
+        args = cdp_scraper.parse_args(["--coffre-lister"])
+        self.assertTrue(args.coffre_lister)
+
+    def test_coffre_changer_mdp(self):
+        args = cdp_scraper.parse_args(["--coffre-changer-mdp"])
+        self.assertTrue(args.coffre_changer_mdp)
+
+
 class TestIndicesMenu(unittest.TestCase):
     def test_vide_tous(self):
         self.assertEqual(cdp_scraper._indices_menu("", 3), [0, 1, 2])
