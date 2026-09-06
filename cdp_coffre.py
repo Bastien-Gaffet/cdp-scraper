@@ -179,3 +179,23 @@ def contient(coffre: dict, nom: str) -> bool:
 
 def lister(coffre: dict) -> list:
     return sorted(coffre.get("entrees", {}))
+
+
+def changer_mdp_maitre(coffre: dict, ancien: str, nouveau: str) -> dict:
+    """Redéchiffre toutes les entrées sous `ancien`, régénère sel + témoin,
+    rechiffre tout sous `nouveau`. Lève MotDePasseMaitreIncorrect (sans rien
+    modifier) si `ancien` est faux."""
+    cle_ancienne = deverrouiller(coffre, ancien)  # lève si `ancien` est faux
+    clairs = {
+        nom: _dechiffrer(cle_ancienne, nom.encode("utf-8"), bloc)
+        for nom, bloc in coffre.get("entrees", {}).items()
+    }
+    nouveau_coffre = creer(nouveau)
+    cle_nouvelle = deverrouiller(nouveau_coffre, nouveau)
+    coffre["kdf"] = nouveau_coffre["kdf"]
+    coffre["temoin"] = nouveau_coffre["temoin"]
+    coffre["entrees"] = {
+        nom: _chiffrer(cle_nouvelle, nom.encode("utf-8"), clair)
+        for nom, clair in clairs.items()
+    }
+    return coffre

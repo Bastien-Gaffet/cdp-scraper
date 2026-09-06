@@ -200,5 +200,37 @@ class TestRetirerContientLister(unittest.TestCase):
         self.assertEqual(len(cdp_coffre.lister(c)), 2)
 
 
+class TestChangerMdpMaitre(unittest.TestCase):
+    def test_ancien_mdp_ne_fonctionne_plus(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "ancien", "mpsi", "secret")
+        cdp_coffre.changer_mdp_maitre(c, "ancien", "nouveau")
+        with self.assertRaises(cdp_coffre.MotDePasseMaitreIncorrect):
+            cdp_coffre.recuperer(c, "ancien", "mpsi")
+
+    def test_nouveau_mdp_fonctionne(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "ancien", "mpsi", "secret")
+        cdp_coffre.changer_mdp_maitre(c, "ancien", "nouveau")
+        self.assertEqual(cdp_coffre.recuperer(c, "nouveau", "mpsi"), "secret")
+
+    def test_toutes_les_entrees_survivent_au_changement(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "ancien", "mpsi", "s1")
+        cdp_coffre.ajouter(c, "ancien", "pcsi", "s2")
+        cdp_coffre.changer_mdp_maitre(c, "ancien", "nouveau")
+        self.assertEqual(cdp_coffre.recuperer(c, "nouveau", "mpsi"), "s1")
+        self.assertEqual(cdp_coffre.recuperer(c, "nouveau", "pcsi"), "s2")
+
+    def test_mauvais_ancien_mdp_leve_et_ne_modifie_rien(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "ancien", "mpsi", "secret")
+        sel_avant = c["kdf"]["sel"]
+        with self.assertRaises(cdp_coffre.MotDePasseMaitreIncorrect):
+            cdp_coffre.changer_mdp_maitre(c, "faux", "nouveau")
+        self.assertEqual(c["kdf"]["sel"], sel_avant)
+        self.assertEqual(cdp_coffre.recuperer(c, "ancien", "mpsi"), "secret")
+
+
 if __name__ == "__main__":
     unittest.main()
