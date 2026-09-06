@@ -117,5 +117,54 @@ class TestCreerDeverrouiller(unittest.TestCase):
         self.assertNotEqual(c1["kdf"]["sel"], c2["kdf"]["sel"])
 
 
+class TestAjouterRecuperer(unittest.TestCase):
+    def test_round_trip_mot_de_passe(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "secretclasse")
+        self.assertEqual(cdp_coffre.recuperer(c, "motmaitre", "mpsi"), "secretclasse")
+
+    def test_ajouter_initialise_le_coffre_au_premier_usage(self):
+        c = cdp_coffre._vide()
+        self.assertFalse(cdp_coffre.est_initialise(c))
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "secretclasse")
+        self.assertTrue(cdp_coffre.est_initialise(c))
+
+    def test_ajouter_deuxieme_classe_meme_coffre(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "secret1")
+        cdp_coffre.ajouter(c, "motmaitre", "pcsi", "secret2")
+        self.assertEqual(cdp_coffre.recuperer(c, "motmaitre", "mpsi"), "secret1")
+        self.assertEqual(cdp_coffre.recuperer(c, "motmaitre", "pcsi"), "secret2")
+
+    def test_ajouter_avec_mauvais_mot_de_passe_maitre_leve(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "secret1")
+        with self.assertRaises(cdp_coffre.MotDePasseMaitreIncorrect):
+            cdp_coffre.ajouter(c, "autrechose", "pcsi", "secret2")
+
+    def test_recuperer_mauvais_mot_de_passe_maitre_leve(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "secret1")
+        with self.assertRaises(cdp_coffre.MotDePasseMaitreIncorrect):
+            cdp_coffre.recuperer(c, "autrechose", "mpsi")
+
+    def test_recuperer_classe_absente_leve(self):
+        c = cdp_coffre.creer("motmaitre")
+        with self.assertRaises(cdp_coffre.ClasseAbsenteDuCoffre):
+            cdp_coffre.recuperer(c, "motmaitre", "inconnue")
+
+    def test_remplacer_mot_de_passe_existant(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "ancien")
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "nouveau")
+        self.assertEqual(cdp_coffre.recuperer(c, "motmaitre", "mpsi"), "nouveau")
+
+    def test_entrees_chiffrees_ne_sont_pas_en_clair(self):
+        c = cdp_coffre._vide()
+        cdp_coffre.ajouter(c, "motmaitre", "mpsi", "secretclasse")
+        # Le JSON sérialisé du coffre ne doit jamais contenir le mot de passe en clair.
+        self.assertNotIn("secretclasse", json.dumps(c))
+
+
 if __name__ == "__main__":
     unittest.main()

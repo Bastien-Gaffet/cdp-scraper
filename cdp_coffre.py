@@ -145,3 +145,24 @@ def deverrouiller(coffre: dict, mdp_maitre: str) -> bytes:
     cle = _derive_cle(mdp_maitre, sel)
     _dechiffrer(cle, b"temoin", coffre["temoin"])
     return cle
+
+
+def ajouter(coffre: dict, mdp_maitre: str, nom: str, mdp_classe: str) -> dict:
+    """Enregistre (ou remplace) le mot de passe de `nom`. Initialise le
+    coffre si c'est le tout premier usage (aucune vérification du mot de
+    passe maître dans ce cas : rien à vérifier contre)."""
+    if not est_initialise(coffre):
+        coffre.update(creer(mdp_maitre))
+    cle = deverrouiller(coffre, mdp_maitre)
+    coffre["entrees"][nom] = _chiffrer(cle, nom.encode("utf-8"), mdp_classe.encode("utf-8"))
+    return coffre
+
+
+def recuperer(coffre: dict, mdp_maitre: str, nom: str) -> str:
+    """Déchiffre le mot de passe de `nom`. Lève MotDePasseMaitreIncorrect ou
+    ClasseAbsenteDuCoffre."""
+    if nom not in coffre.get("entrees", {}):
+        raise ClasseAbsenteDuCoffre(f"Aucun mot de passe enregistré pour « {nom} ».")
+    cle = deverrouiller(coffre, mdp_maitre)
+    clair = _dechiffrer(cle, nom.encode("utf-8"), coffre["entrees"][nom])
+    return clair.decode("utf-8")
