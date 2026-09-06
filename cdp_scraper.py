@@ -1077,10 +1077,44 @@ def main():
         print(jaune("\nAucune classe sélectionnée."))
         return
 
+    chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+    coffre = _charger_coffre(chemin_cf) if chemin_cf.is_file() else None
+    classes_en_coffre = ([cfg["nom"] for cfg in choisies if cdp_coffre.contient(coffre, cfg["nom"])]
+                         if coffre else [])
+
+    mdp_maitre = None
+    coffre_utilisable = False
+    if not args.mdp and classes_en_coffre:
+        if demander_oui_non(
+                "Utiliser le coffre chiffré pour déverrouiller les mots de passe enregistrés ?",
+                defaut=True):
+            _assurer_dependances(("cryptography",))
+            for _ in range(3):
+                essai = demander("Mot de passe maître du coffre", secret=True)
+                try:
+                    cdp_coffre.deverrouiller(coffre, essai)
+                except cdp_coffre.MotDePasseMaitreIncorrect:
+                    print(rouge("Mot de passe maître incorrect."))
+                    continue
+                mdp_maitre = essai
+                coffre_utilisable = True
+                break
+            if not coffre_utilisable:
+                print(jaune("Trois échecs : saisie manuelle pour la suite."))
+
     resumes = []
     for cfg in choisies:
-        mdp = args.mdp or demander(f"Mot de passe pour « {cfg['nom']} »", secret=True)
-        resumes.append(traiter_classe(cfg, args, mdp, args.simulation))
+        if args.mdp:
+            mdp = args.mdp
+        elif coffre_utilisable and cfg["nom"] in classes_en_coffre:
+            mdp = cdp_coffre.recuperer(coffre, mdp_maitre, cfg["nom"])
+        else:
+            mdp = demander(f"Mot de passe pour « {cfg['nom']} »", secret=True)
+        resume = traiter_classe(cfg, args, mdp, args.simulation)
+        resumes.append(resume)
+        if resume.get("ok") and not args.mdp:
+            mdp_maitre_connu = mdp_maitre if coffre_utilisable else None
+            proposer_coffre(config, chemin_cfg, cfg, mdp, args.coffre, mdp_maitre_connu)
     afficher_resume_global(resumes)
 
 

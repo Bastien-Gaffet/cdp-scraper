@@ -525,7 +525,7 @@ class TestMainSelection(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.chemin = Path(self.tmp.name) / "config.json"
-        import cdp_config
+        self.chemin_coffre = Path(self.tmp.name) / "coffre.json"
         c = cdp_config._vide()
         for n in ("mpsi", "pcsi"):
             c["classes"].append({"nom": n, "url": f"https://x/{n}",
@@ -535,28 +535,77 @@ class TestMainSelection(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _run(self, argv, traites):
+    def _run(self, argv, traites, entrees_input=(), demander_side_effect=None):
         def faux_traiter(cfg, args, mdp, simulation):
-            traites.append(cfg["nom"])
+            traites.append((cfg["nom"], mdp))
             return {"nom": cfg["nom"], "ok": True, "compteur": {"ok": 1, "echec": 0}, "volume": {}}
+        argv = list(argv) + ["--coffre", str(self.chemin_coffre)]
+        demander_kwargs = ({"side_effect": demander_side_effect} if demander_side_effect is not None
+                           else {"return_value": "motdepasse"})
         with mock.patch.object(cdp_scraper, "parse_args",
                                return_value=cdp_scraper.parse_args(argv)), \
              mock.patch.object(cdp_scraper, "verifier_accord"), \
              mock.patch.object(cdp_scraper.cdp_config, "chemin_config",
                                return_value=self.chemin), \
-             mock.patch.object(cdp_scraper, "demander", return_value="motdepasse"), \
-             mock.patch.object(cdp_scraper, "traiter_classe", side_effect=faux_traiter):
+             mock.patch.object(cdp_scraper, "demander", **demander_kwargs), \
+             mock.patch.object(cdp_scraper, "_tty", return_value=False), \
+             mock.patch.object(cdp_scraper, "traiter_classe", side_effect=faux_traiter), \
+             mock.patch("builtins.input", side_effect=list(entrees_input)):
             cdp_scraper.main()
 
     def test_noms_filtrent(self):
         traites = []
         self._run(["pcsi"], traites)
-        self.assertEqual(traites, ["pcsi"])
+        self.assertEqual([n for n, _ in traites], ["pcsi"])
 
     def test_tout_traite_toutes(self):
         traites = []
         self._run(["--tout"], traites)
-        self.assertEqual(sorted(traites), ["mpsi", "pcsi"])
+        self.assertEqual(sorted(n for n, _ in traites), ["mpsi", "pcsi"])
+
+    def test_aucune_classe_en_coffre_saisie_manuelle(self):
+        traites = []
+        self._run(["--tout"], traites)
+        self.assertTrue(all(mdp == "motdepasse" for _, mdp in traites))
+
+    def test_classe_en_coffre_deverrouillee_sans_ressaisie(self):
+        coffre = cdp_coffre._vide()
+        cdp_coffre.ajouter(coffre, "motmaitre", "mpsi", "secretmpsi")
+        cdp_coffre.enregistrer(self.chemin_coffre, coffre)
+        traites = []
+        self._run(["--tout"], traites, entrees_input=["o"],
+                  demander_side_effect=["motmaitre", "motdepasse"])
+        mdp_par_classe = dict(traites)
+        self.assertEqual(mdp_par_classe["mpsi"], "secretmpsi")
+        self.assertEqual(mdp_par_classe["pcsi"], "motdepasse")
+
+    def test_refus_utiliser_coffre_saisie_manuelle_pour_toutes(self):
+        coffre = cdp_coffre._vide()
+        cdp_coffre.ajouter(coffre, "motmaitre", "mpsi", "secretmpsi")
+        cdp_coffre.enregistrer(self.chemin_coffre, coffre)
+        traites = []
+        self._run(["--tout"], traites, entrees_input=["n"])
+        self.assertTrue(all(mdp == "motdepasse" for _, mdp in traites))
+
+    def test_trois_echecs_mdp_maitre_replie_en_manuel(self):
+        coffre = cdp_coffre._vide()
+        cdp_coffre.ajouter(coffre, "motmaitre", "mpsi", "secretmpsi")
+        cdp_coffre.enregistrer(self.chemin_coffre, coffre)
+        traites = []
+        self._run(["--tout"], traites, entrees_input=["o"],
+                  demander_side_effect=["faux1", "faux2", "faux3", "motdepasse", "motdepasse"])
+        self.assertTrue(all(mdp == "motdepasse" for _, mdp in traites))
+
+    def test_mdp_argument_ignore_le_coffre(self):
+        coffre = cdp_coffre._vide()
+        cdp_coffre.ajouter(coffre, "motmaitre", "mpsi", "secretmpsi")
+        cdp_coffre.enregistrer(self.chemin_coffre, coffre)
+        traites = []
+        # entrees_input reste vide (défaut de _run) : le moindre appel à
+        # input() ferait échouer le test avec StopIteration, donc l'absence
+        # d'exception prouve qu'aucune question sur le coffre n'a été posée.
+        self._run(["--tout", "--mdp", "impose"], traites)
+        self.assertTrue(all(mdp == "impose" for _, mdp in traites))
 
 
 class TestCommandesCoffre(unittest.TestCase):
