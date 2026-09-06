@@ -310,5 +310,92 @@ class TestAppliquerMaj(unittest.TestCase):
         self.assertTrue((self.dossier / "bon.py").exists())
 
 
+class TestProposerMaj(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin_cache = Path(self.tmp.name) / "maj.json"
+        self.dossier_projet = Path(self.tmp.name) / "projet"
+        self.dossier_projet.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _appel(self, **kw):
+        defaut = dict(version_locale="1.5.0", chemin_cache=self.chemin_cache,
+                     depot="owner/repo", dossier_projet=self.dossier_projet, tty=lambda: True)
+        defaut.update(kw)
+        cdp_maj.proposer_maj(**defaut)
+
+    def test_a_jour_aucune_question(self):
+        with mock.patch.object(cdp_maj, "verifier_maj", return_value=None), \
+             mock.patch("builtins.input") as input_mock:
+            self._appel()
+        input_mock.assert_not_called()
+
+    def test_hors_tty_notice_sans_question(self):
+        with mock.patch.object(cdp_maj, "verifier_maj", return_value="1.6.0"), \
+             mock.patch("builtins.input") as input_mock:
+            self._appel(tty=lambda: False)
+        input_mock.assert_not_called()
+
+    def test_refus_utilisateur_ne_fait_rien(self):
+        with mock.patch.object(cdp_maj, "verifier_maj", return_value="1.6.0"), \
+             mock.patch("builtins.input", return_value="n"), \
+             mock.patch.object(cdp_maj, "est_depot_git") as git_mock:
+            self._appel()
+        git_mock.assert_not_called()
+
+    def test_depot_git_confirme_appelle_git_pull_pas_la_liste_zip(self):
+        (self.dossier_projet / ".git").mkdir()
+        with mock.patch.object(cdp_maj, "verifier_maj", return_value="1.6.0"), \
+             mock.patch("builtins.input", return_value="o"), \
+             mock.patch.object(cdp_maj, "git_pull", return_value=(True, "ok")) as pull_mock, \
+             mock.patch.object(cdp_maj, "lister_fichiers_maj") as lister_mock:
+            self._appel()
+        pull_mock.assert_called_once()
+        lister_mock.assert_not_called()
+
+    def test_refus_confirmation_git_pull_specifique(self):
+        (self.dossier_projet / ".git").mkdir()
+        with mock.patch.object(cdp_maj, "verifier_maj", return_value="1.6.0"), \
+             mock.patch("builtins.input", side_effect=["o", "n"]), \
+             mock.patch.object(cdp_maj, "git_pull") as pull_mock:
+            self._appel()
+        pull_mock.assert_not_called()
+
+    def test_zip_confirme_va_jusqu_a_appliquer(self):
+        with mock.patch.object(cdp_maj, "verifier_maj", return_value="1.6.0"), \
+             mock.patch("builtins.input", return_value="o"), \
+             mock.patch.object(cdp_maj, "lister_fichiers_maj",
+                               return_value=[{"nom": "a.py", "download_url": "u"}]) as lister_mock, \
+             mock.patch.object(cdp_maj, "telecharger_fichiers",
+                               return_value={"a.py": b"x"}) as dl_mock, \
+             mock.patch.object(cdp_maj, "appliquer_maj") as appliquer_mock:
+            self._appel()
+        lister_mock.assert_called_once()
+        dl_mock.assert_called_once()
+        appliquer_mock.assert_called_once_with(self.dossier_projet, {"a.py": b"x"})
+
+    def test_echec_liste_fichiers_n_ecrit_rien(self):
+        with mock.patch.object(cdp_maj, "verifier_maj", return_value="1.6.0"), \
+             mock.patch("builtins.input", return_value="o"), \
+             mock.patch.object(cdp_maj, "lister_fichiers_maj", return_value=None), \
+             mock.patch.object(cdp_maj, "telecharger_fichiers") as dl_mock, \
+             mock.patch.object(cdp_maj, "appliquer_maj") as appliquer_mock:
+            self._appel()
+        dl_mock.assert_not_called()
+        appliquer_mock.assert_not_called()
+
+    def test_echec_telechargement_n_applique_rien(self):
+        with mock.patch.object(cdp_maj, "verifier_maj", return_value="1.6.0"), \
+             mock.patch("builtins.input", return_value="o"), \
+             mock.patch.object(cdp_maj, "lister_fichiers_maj",
+                               return_value=[{"nom": "a.py", "download_url": "u"}]), \
+             mock.patch.object(cdp_maj, "telecharger_fichiers", return_value=None), \
+             mock.patch.object(cdp_maj, "appliquer_maj") as appliquer_mock:
+            self._appel()
+        appliquer_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -189,3 +189,47 @@ def appliquer_maj(dossier: Path, fichiers: dict) -> None:
         tmp = cible.with_name(cible.name + ".part")
         tmp.write_bytes(contenu)
         os.replace(tmp, cible)
+
+
+def proposer_maj(version_locale: str, chemin_cache: Path, depot: str,
+                  dossier_projet: Path, tty) -> None:
+    """Vérifie une nouvelle version puis, si l'utilisateur confirme (terminal
+    interactif uniquement), met à jour sur place : `git pull` si `dossier_projet`
+    est un dépôt Git, sinon remplacement atomique des fichiers du projet
+    (jamais `cours_cdp/` ni `.cdp-scraper/`, qui ne font pas partie de la
+    liste). `tty` est un callable (`() -> bool`) injecté pour rester testable
+    sans terminal réel."""
+    nouvelle = verifier_maj(version_locale, chemin_cache, depot)
+    if not nouvelle:
+        return
+    print(f"Une nouvelle version est disponible : {nouvelle} "
+          f"(vous avez {version_locale}).")
+    if not tty():
+        return
+    if input("Mettre à jour maintenant ? [o/N] : ").strip().lower() not in ("o", "oui"):
+        return
+
+    if est_depot_git(dossier_projet):
+        rep = input("Dépôt Git détecté. Lancer `git pull` ? [o/N] : ").strip().lower()
+        if rep not in ("o", "oui"):
+            return
+        ok, message = git_pull(dossier_projet)
+        print(message)
+        if ok:
+            print("Relancez la commande pour utiliser la nouvelle version.")
+        return
+
+    tag = f"v{nouvelle}"
+    print("Récupération de la liste des fichiers du projet…")
+    fichiers = lister_fichiers_maj(depot, tag)
+    if not fichiers:
+        print("Échec : impossible de récupérer la liste des fichiers. Rien n'a été modifié.")
+        return
+    print(f"{len(fichiers)} fichier(s) à mettre à jour "
+          "(cours_cdp/ et .cdp-scraper/ ne sont jamais touchés).")
+    contenus = telecharger_fichiers(fichiers)
+    if not contenus:
+        print("Échec du téléchargement d'au moins un fichier. Rien n'a été modifié.")
+        return
+    appliquer_maj(dossier_projet, contenus)
+    print(f"Mise à jour vers {nouvelle} terminée. Relancez la commande.")
