@@ -129,5 +129,67 @@ class TestDerniereVersionGithub(unittest.TestCase):
             self.assertIsNone(cdp_maj.derniere_version_github("owner/repo"))
 
 
+class TestVerifierMaj(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin = Path(self.tmp.name) / "maj.json"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_cache_absent_appelle_et_ecrit(self):
+        with mock.patch.object(cdp_maj, "derniere_version_github", return_value="1.6.0"):
+            resultat = cdp_maj.verifier_maj("1.5.0", self.chemin, "owner/repo")
+        self.assertEqual(resultat, "1.6.0")
+        cache = cdp_maj.charger(self.chemin)
+        self.assertEqual(cache["derniere_version_connue"], "1.6.0")
+        self.assertIn("derniere_verif", cache)
+
+    def test_version_egale_renvoie_none(self):
+        with mock.patch.object(cdp_maj, "derniere_version_github", return_value="1.5.0"):
+            resultat = cdp_maj.verifier_maj("1.5.0", self.chemin, "owner/repo")
+        self.assertIsNone(resultat)
+
+    def test_version_distante_inferieure_renvoie_none(self):
+        with mock.patch.object(cdp_maj, "derniere_version_github", return_value="1.4.0"):
+            resultat = cdp_maj.verifier_maj("1.5.0", self.chemin, "owner/repo")
+        self.assertIsNone(resultat)
+
+    def test_cache_recent_pas_de_rappel_reseau(self):
+        cdp_maj.enregistrer(self.chemin, {
+            "derniere_verif": datetime.now().isoformat(timespec="seconds"),
+            "derniere_version_connue": "1.6.0",
+        })
+        with mock.patch.object(cdp_maj, "derniere_version_github") as mock_gh:
+            resultat = cdp_maj.verifier_maj("1.5.0", self.chemin, "owner/repo")
+        mock_gh.assert_not_called()
+        self.assertEqual(resultat, "1.6.0")
+
+    def test_cache_ancien_rappelle(self):
+        ancien = datetime.now() - timedelta(hours=25)
+        cdp_maj.enregistrer(self.chemin, {
+            "derniere_verif": ancien.isoformat(timespec="seconds"),
+            "derniere_version_connue": "1.5.0",
+        })
+        with mock.patch.object(cdp_maj, "derniere_version_github",
+                               return_value="1.6.0") as mock_gh:
+            resultat = cdp_maj.verifier_maj("1.5.0", self.chemin, "owner/repo")
+        mock_gh.assert_called_once()
+        self.assertEqual(resultat, "1.6.0")
+
+    def test_echec_reseau_garde_ancienne_version_et_maj_horodatage(self):
+        ancien = datetime.now() - timedelta(hours=25)
+        ancien_iso = ancien.isoformat(timespec="seconds")
+        cdp_maj.enregistrer(self.chemin, {
+            "derniere_verif": ancien_iso,
+            "derniere_version_connue": "1.6.0",
+        })
+        with mock.patch.object(cdp_maj, "derniere_version_github", return_value=None):
+            resultat = cdp_maj.verifier_maj("1.5.0", self.chemin, "owner/repo")
+        self.assertEqual(resultat, "1.6.0")
+        cache = cdp_maj.charger(self.chemin)
+        self.assertNotEqual(cache["derniere_verif"], ancien_iso)
+
+
 if __name__ == "__main__":
     unittest.main()

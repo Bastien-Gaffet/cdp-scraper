@@ -87,3 +87,34 @@ def derniere_version_github(depot: str, timeout: float = 2.0):
         return str(donnees["tag_name"]).lstrip("vV")
     except (OSError, ValueError, KeyError):
         return None
+
+
+def verifier_maj(version_locale: str, chemin_cache: Path, depot: str):
+    """Renvoie la version distante si elle est plus récente que
+    `version_locale`, sinon None. Au plus un appel réseau par 24 h (mis en
+    cache) ; le cache est mis à jour même en cas d'échec, pour ne pas
+    retenter l'appel à chaque run tant qu'on est hors-ligne."""
+    cache = charger(chemin_cache)
+    maintenant = datetime.now()
+    derniere_verif = cache.get("derniere_verif")
+    assez_recent = False
+    if derniere_verif:
+        try:
+            assez_recent = maintenant - datetime.fromisoformat(derniere_verif) < DELAI_CACHE
+        except ValueError:
+            assez_recent = False
+
+    if assez_recent:
+        connue = cache.get("derniere_version_connue")
+    else:
+        connue = derniere_version_github(depot)
+        cache["derniere_verif"] = maintenant.isoformat(timespec="seconds")
+        if connue:
+            cache["derniere_version_connue"] = connue
+        else:
+            connue = cache.get("derniere_version_connue")
+        enregistrer(chemin_cache, cache)
+
+    if connue and _version_tuple(connue) > _version_tuple(version_locale):
+        return connue
+    return None
