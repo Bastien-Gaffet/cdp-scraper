@@ -33,6 +33,7 @@ from pathlib import Path
 from datetime import datetime
 import cdp_manifeste
 import cdp_config
+import cdp_coffre
 from urllib.parse import urljoin, urlsplit, unquote
 
 __version__ = "1.4.0"
@@ -527,6 +528,59 @@ def normaliser_url(url: str) -> str:
         url = "https://" + url
     return url.rstrip("/")
 
+
+def _tty() -> bool:
+    return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+
+def decision_coffre(choix: str) -> str:
+    """Normalise la réponse à la question d'activation du coffre.
+    Renvoie 'enregistrer', 'jamais' ou 'plus_tard' (défaut, y compris pour
+    une réponse vide ou invalide)."""
+    c = choix.strip().lower()
+    if c == "o":
+        return "enregistrer"
+    if c == "j":
+        return "jamais"
+    return "plus_tard"
+
+
+def proposer_coffre(config: dict, chemin_cfg, cfg: dict, mdp: str,
+                     chemin_coffre_override=None, mdp_maitre_connu=None) -> None:
+    """Propose une seule fois (par classe) d'enregistrer `mdp` dans le coffre
+    chiffré. Ne fait rien si déjà tranché (`coffre_propose`) ou hors terminal
+    interactif. Met à jour et enregistre `config` selon la réponse.
+
+    `mdp_maitre_connu` : si un mot de passe maître a déjà été validé plus tôt
+    dans le même run (déverrouillage du coffre en boucle multi-classes), on le
+    réutilise au lieu de le redemander — un seul mot de passe maître par run."""
+    if cfg.get("coffre_propose") or not _tty():
+        return
+    nom = cfg["nom"]
+    print(f"\nEnregistrer le mot de passe de « {nom} » dans le coffre chiffré ?")
+    print("  [o] Oui, l'enregistrer maintenant")
+    print("  [n] Non, redemander la prochaine fois   (défaut)")
+    print("  [j] Non, ne plus jamais demander pour cette classe")
+    decision = decision_coffre(input("Choix [o/n/j] : "))
+
+    if decision == "plus_tard":
+        return
+
+    if decision == "enregistrer":
+        _assurer_dependances(("cryptography",))
+        chemin_cf = cdp_coffre.chemin_coffre(chemin_coffre_override)
+        coffre = _charger_coffre(chemin_cf)
+        mdp_maitre = mdp_maitre_connu or demander("Mot de passe maître du coffre", secret=True)
+        cdp_coffre.ajouter(coffre, mdp_maitre, nom, mdp)
+        cdp_coffre.enregistrer(chemin_cf, coffre)
+        print(vert(f"Mot de passe de « {nom} » enregistré dans le coffre."))
+    else:  # "jamais"
+        print(dim(f"  Vous pourrez l'activer plus tard avec --coffre-ajouter {nom}."))
+
+    cfg["coffre_propose"] = True
+    cdp_config.ajouter_ou_maj(config, cfg)
+    cdp_config.enregistrer(chemin_cfg, config)
+
 # ─── Conditions d'usage (acceptation au premier lancement) ────────────────────
 
 AVERTISSEMENT = """\
@@ -548,9 +602,12 @@ AVERTISSEMENT = """\
    • Rester mesuré : un seul flux de requêtes, option --delai pour
      ménager le serveur de l'association qui héberge le site.
 
- Vos identifiants ne sont JAMAIS stockés ni transmis à un tiers : ils
- servent seulement à la connexion directe au site (RGPD : aucune
- collecte, aucun envoi vers un serveur externe au vôtre).
+ Par défaut, vos identifiants ne sont jamais stockés : ils servent
+ uniquement à la connexion directe au site. Si vous activez volontairement
+ le coffre chiffré, votre mot de passe est chiffré localement (AES-256-GCM,
+ clé dérivée d'un mot de passe maître que vous seul connaissez) et ne
+ quitte jamais votre machine. Dans tous les cas : aucune collecte, aucun
+ envoi vers un serveur externe au vôtre (RGPD).
 
 └────────────────────────────────────────────────────────────────────┘
 """
@@ -639,6 +696,16 @@ Exemples :
                    help="Afficher les classes mémorisées puis quitter")
     p.add_argument("--config-supprimer", metavar="NOM",
                    help="Retirer une classe de la config puis quitter")
+    p.add_argument("--coffre", metavar="CHEMIN",
+                   help="Chemin du fichier de coffre chiffré (défaut : .cdp-scraper/coffre.json)")
+    p.add_argument("--coffre-ajouter", metavar="NOM",
+                   help="Enregistrer le mot de passe d'une classe déjà mémorisée dans le coffre chiffré")
+    p.add_argument("--coffre-supprimer", metavar="NOM",
+                   help="Retirer le mot de passe d'une classe du coffre chiffré")
+    p.add_argument("--coffre-lister", action="store_true",
+                   help="Afficher les classes ayant un mot de passe dans le coffre puis quitter")
+    p.add_argument("--coffre-changer-mdp", action="store_true",
+                   help="Changer le mot de passe maître du coffre chiffré puis quitter")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
     return p.parse_args(argv)
 
@@ -824,6 +891,26 @@ def afficher_config(config: dict):
     print()
 
 
+def afficher_coffre(coffre: dict):
+    noms = cdp_coffre.lister(coffre)
+    if not noms:
+        print(jaune("\nAucun mot de passe enregistré dans le coffre."))
+        return
+    print(gras(f"\n{len(noms)} mot(s) de passe enregistré(s) dans le coffre :\n"))
+    for nom in noms:
+        print(f"  • {gras(nom)}")
+    print()
+
+
+def _charger_coffre(chemin) -> dict:
+    """Charge le coffre ; quitte proprement si la version du schéma est trop récente."""
+    try:
+        return cdp_coffre.charger(chemin)
+    except cdp_coffre.CoffreVersionFuture as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+
 def afficher_resume_global(resumes: list):
     """Résumé agrégé d'un run multi-classes (rien si une seule classe : son
     résumé a déjà été affiché)."""
@@ -871,14 +958,19 @@ def run_classe_unique(args, config, chemin_cfg):
     cfg = {"nom": nom, "url": url, "login": login, "dossier": sortie}
     resume = traiter_classe(cfg, args, mdp, simulation)
 
-    if (resume.get("ok") and not args.reprise and interactif
-            and not cdp_config.contient(config, nom)):
+    deja_connue = cdp_config.contient(config, nom)
+    if resume.get("ok") and not args.reprise and interactif and not deja_connue:
         if demander_oui_non(
                 f"Mémoriser la classe « {nom} » dans la config ? (jamais le mot de passe)",
                 defaut=True):
             cdp_config.ajouter_ou_maj(config, cfg)
             cdp_config.enregistrer(chemin_cfg, config)
             print(vert(f"Classe « {nom} » mémorisée dans {chemin_cfg}."))
+            deja_connue = True
+
+    if resume.get("ok") and deja_connue and not args.mdp:
+        cfg_actuelle = cdp_config.selectionner(config, [nom])[0]
+        proposer_coffre(config, chemin_cfg, cfg_actuelle, mdp, args.coffre)
 
 
 def main():
@@ -906,7 +998,62 @@ def main():
             return
         cdp_config.retirer(config, args.config_supprimer)
         cdp_config.enregistrer(chemin_cfg, config)
+        chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+        if chemin_cf.is_file():
+            coffre = _charger_coffre(chemin_cf)
+            if cdp_coffre.contient(coffre, args.config_supprimer):
+                cdp_coffre.retirer(coffre, args.config_supprimer)
+                cdp_coffre.enregistrer(chemin_cf, coffre)
         print(vert(f"\nClasse « {args.config_supprimer} » retirée de la config."))
+        return
+    if args.coffre_lister:
+        afficher_coffre(_charger_coffre(cdp_coffre.chemin_coffre(args.coffre)))
+        return
+    if args.coffre_supprimer:
+        chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+        coffre = _charger_coffre(chemin_cf)
+        if not cdp_coffre.contient(coffre, args.coffre_supprimer):
+            print(jaune(f"\nAucun mot de passe enregistré pour « {args.coffre_supprimer} »."))
+            return
+        cdp_coffre.retirer(coffre, args.coffre_supprimer)
+        cdp_coffre.enregistrer(chemin_cf, coffre)
+        print(vert(f"\nMot de passe de « {args.coffre_supprimer} » retiré du coffre."))
+        return
+    if args.coffre_ajouter:
+        nom = args.coffre_ajouter
+        if not cdp_config.contient(config, nom):
+            print(jaune(f"\nClasse « {nom} » absente de la config. "
+                        "Mémorisez-la d'abord (lancez un run normal dessus)."))
+            return
+        _assurer_dependances(("cryptography",))
+        chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+        coffre = _charger_coffre(chemin_cf)
+        mdp_maitre = demander("Mot de passe maître du coffre", secret=True)
+        mdp_classe = demander(f"Mot de passe de « {nom} »", secret=True)
+        cdp_coffre.ajouter(coffre, mdp_maitre, nom, mdp_classe)
+        cdp_coffre.enregistrer(chemin_cf, coffre)
+        cfg = cdp_config.selectionner(config, [nom])[0]
+        cfg["coffre_propose"] = True
+        cdp_config.ajouter_ou_maj(config, cfg)
+        cdp_config.enregistrer(chemin_cfg, config)
+        print(vert(f"\nMot de passe de « {nom} » enregistré dans le coffre."))
+        return
+    if args.coffre_changer_mdp:
+        chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+        coffre = _charger_coffre(chemin_cf)
+        if not cdp_coffre.est_initialise(coffre):
+            print(jaune("\nLe coffre est vide, rien à changer."))
+            return
+        _assurer_dependances(("cryptography",))
+        ancien = demander("Mot de passe maître actuel", secret=True)
+        nouveau = demander("Nouveau mot de passe maître", secret=True)
+        try:
+            cdp_coffre.changer_mdp_maitre(coffre, ancien, nouveau)
+        except cdp_coffre.MotDePasseMaitreIncorrect:
+            print(rouge("\nMot de passe maître actuel incorrect."))
+            sys.exit(1)
+        cdp_coffre.enregistrer(chemin_cf, coffre)
+        print(vert("\nMot de passe maître du coffre changé."))
         return
 
     # Mono-classe : --url explicite, ou config vide → interactif mono-classe.
@@ -930,10 +1077,44 @@ def main():
         print(jaune("\nAucune classe sélectionnée."))
         return
 
+    chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+    coffre = _charger_coffre(chemin_cf) if chemin_cf.is_file() else None
+    classes_en_coffre = ([cfg["nom"] for cfg in choisies if cdp_coffre.contient(coffre, cfg["nom"])]
+                         if coffre else [])
+
+    mdp_maitre = None
+    coffre_utilisable = False
+    if not args.mdp and classes_en_coffre:
+        if demander_oui_non(
+                "Utiliser le coffre chiffré pour déverrouiller les mots de passe enregistrés ?",
+                defaut=True):
+            _assurer_dependances(("cryptography",))
+            for _ in range(3):
+                essai = demander("Mot de passe maître du coffre", secret=True)
+                try:
+                    cdp_coffre.deverrouiller(coffre, essai)
+                except cdp_coffre.MotDePasseMaitreIncorrect:
+                    print(rouge("Mot de passe maître incorrect."))
+                    continue
+                mdp_maitre = essai
+                coffre_utilisable = True
+                break
+            if not coffre_utilisable:
+                print(jaune("Trois échecs : saisie manuelle pour la suite."))
+
     resumes = []
     for cfg in choisies:
-        mdp = args.mdp or demander(f"Mot de passe pour « {cfg['nom']} »", secret=True)
-        resumes.append(traiter_classe(cfg, args, mdp, args.simulation))
+        if args.mdp:
+            mdp = args.mdp
+        elif coffre_utilisable and cfg["nom"] in classes_en_coffre:
+            mdp = cdp_coffre.recuperer(coffre, mdp_maitre, cfg["nom"])
+        else:
+            mdp = demander(f"Mot de passe pour « {cfg['nom']} »", secret=True)
+        resume = traiter_classe(cfg, args, mdp, args.simulation)
+        resumes.append(resume)
+        if resume.get("ok") and not args.mdp:
+            mdp_maitre_connu = mdp_maitre if coffre_utilisable else None
+            proposer_coffre(config, chemin_cfg, cfg, mdp, args.coffre, mdp_maitre_connu)
     afficher_resume_global(resumes)
 
 

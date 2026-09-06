@@ -7,6 +7,25 @@ et le projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 La version est unique pour l'ensemble du projet : `cdp_scraper.py` et
 `cdp_viewer.py` portent le même numéro et sont publiés ensemble.
 
+## [1.4.0] - 2026-09-06
+
+### Ajouté
+- **Coffre de mots de passe chiffré (optionnel)** : après le traitement d'une
+  classe mémorisée, le scraper propose de chiffrer son mot de passe
+  (AES-256-GCM, clé dérivée par Scrypt d'un mot de passe maître) dans
+  `.cdp-scraper/coffre.json`. Un seul mot de passe maître par run suffit
+  ensuite à déverrouiller toutes les classes du coffre lors d'un run
+  multi-classes — plus besoin de retaper chaque mot de passe.
+  Commandes `--coffre-ajouter NOM`, `--coffre-supprimer NOM`,
+  `--coffre-lister`, `--coffre-changer-mdp`, `--coffre CHEMIN`.
+- Nouveau module `cdp_coffre.py` (fonctions pures + I/O atomique, testable
+  hors-ligne, dépendance `cryptography` installée à la demande — jamais pour
+  qui n'active pas le coffre).
+
+### Modifié
+- Le texte des conditions d'usage reflète le nouveau comportement optionnel
+  (mots de passe toujours non stockés par défaut, coffre chiffré en option).
+
 ## [1.3.0] - 2026-06-23
 
 ### Ajouté

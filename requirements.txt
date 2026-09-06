@@ -1,3 +1,8 @@
-# Seule dépendance : requests (HTTP + session/cookies).
+# Dépendance obligatoire : requests (HTTP + session/cookies).
 # Les couleurs du terminal et l'analyse HTML sont gérées sans dépendance externe.
 requests>=2.25
+
+# Dépendance optionnelle : cryptography, installée automatiquement à la demande
+# (comme requests) seulement si vous activez le coffre de mots de passe chiffré
+# (--coffre-ajouter, ou en répondant "o" à la proposition après une classe).
+# cryptography>=41
