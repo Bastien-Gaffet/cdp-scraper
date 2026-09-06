@@ -73,3 +73,17 @@ def _version_tuple(s: str) -> tuple:
         return tuple(int(m) for m in s.split("."))
     except ValueError:
         return ()
+
+
+def derniere_version_github(depot: str, timeout: float = 2.0):
+    """GET /repos/<depot>/releases/latest. Renvoie le tag sans préfixe `v`,
+    ou None pour toute erreur (réseau, timeout, JSON invalide, code HTTP,
+    clé absente) — ne lève jamais."""
+    url = f"https://api.github.com/repos/{depot}/releases/latest"
+    requete = urllib.request.Request(url, headers={"User-Agent": "cdp-scraper"})
+    try:
+        with urllib.request.urlopen(requete, timeout=timeout) as reponse:
+            donnees = json.loads(reponse.read().decode("utf-8"))
+        return str(donnees["tag_name"]).lstrip("vV")
+    except (OSError, ValueError, KeyError):
+        return None

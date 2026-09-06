@@ -85,5 +85,49 @@ class TestVersionTuple(unittest.TestCase):
         self.assertGreater(cdp_maj._version_tuple("1.6.0"), cdp_maj._version_tuple("1.5.0"))
 
 
+class _FausseReponse:
+    """Contexte minimal imitant l'objet renvoyé par urllib.request.urlopen."""
+
+    def __init__(self, contenu: bytes):
+        self._contenu = contenu
+
+    def read(self):
+        return self._contenu
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+class TestDerniereVersionGithub(unittest.TestCase):
+    def test_succes(self):
+        corps = json.dumps({"tag_name": "v1.6.0"}).encode("utf-8")
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               return_value=_FausseReponse(corps)):
+            self.assertEqual(cdp_maj.derniere_version_github("owner/repo"), "1.6.0")
+
+    def test_timeout(self):
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               side_effect=TimeoutError()):
+            self.assertIsNone(cdp_maj.derniere_version_github("owner/repo"))
+
+    def test_erreur_url(self):
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               side_effect=cdp_maj.urllib.error.URLError("boom")):
+            self.assertIsNone(cdp_maj.derniere_version_github("owner/repo"))
+
+    def test_json_invalide(self):
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               return_value=_FausseReponse(b"pas du json")):
+            self.assertIsNone(cdp_maj.derniere_version_github("owner/repo"))
+
+    def test_cle_tag_name_absente(self):
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               return_value=_FausseReponse(b"{}")):
+            self.assertIsNone(cdp_maj.derniere_version_github("owner/repo"))
+
+
 if __name__ == "__main__":
     unittest.main()
