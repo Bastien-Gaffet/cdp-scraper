@@ -835,6 +835,26 @@ def afficher_config(config: dict):
     print()
 
 
+def afficher_coffre(coffre: dict):
+    noms = cdp_coffre.lister(coffre)
+    if not noms:
+        print(jaune("\nAucun mot de passe enregistré dans le coffre."))
+        return
+    print(gras(f"\n{len(noms)} mot(s) de passe enregistré(s) dans le coffre :\n"))
+    for nom in noms:
+        print(f"  • {gras(nom)}")
+    print()
+
+
+def _charger_coffre(chemin) -> dict:
+    """Charge le coffre ; quitte proprement si la version du schéma est trop récente."""
+    try:
+        return cdp_coffre.charger(chemin)
+    except cdp_coffre.CoffreVersionFuture as e:
+        print(rouge(f"\n{e}"))
+        sys.exit(1)
+
+
 def afficher_resume_global(resumes: list):
     """Résumé agrégé d'un run multi-classes (rien si une seule classe : son
     résumé a déjà été affiché)."""
@@ -918,6 +938,55 @@ def main():
         cdp_config.retirer(config, args.config_supprimer)
         cdp_config.enregistrer(chemin_cfg, config)
         print(vert(f"\nClasse « {args.config_supprimer} » retirée de la config."))
+        return
+    if args.coffre_lister:
+        afficher_coffre(_charger_coffre(cdp_coffre.chemin_coffre(args.coffre)))
+        return
+    if args.coffre_supprimer:
+        chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+        coffre = _charger_coffre(chemin_cf)
+        if not cdp_coffre.contient(coffre, args.coffre_supprimer):
+            print(jaune(f"\nAucun mot de passe enregistré pour « {args.coffre_supprimer} »."))
+            return
+        cdp_coffre.retirer(coffre, args.coffre_supprimer)
+        cdp_coffre.enregistrer(chemin_cf, coffre)
+        print(vert(f"\nMot de passe de « {args.coffre_supprimer} » retiré du coffre."))
+        return
+    if args.coffre_ajouter:
+        nom = args.coffre_ajouter
+        if not cdp_config.contient(config, nom):
+            print(jaune(f"\nClasse « {nom} » absente de la config. "
+                        "Mémorisez-la d'abord (lancez un run normal dessus)."))
+            return
+        _assurer_dependances(("cryptography",))
+        chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+        coffre = _charger_coffre(chemin_cf)
+        mdp_maitre = demander("Mot de passe maître du coffre", secret=True)
+        mdp_classe = demander(f"Mot de passe de « {nom} »", secret=True)
+        cdp_coffre.ajouter(coffre, mdp_maitre, nom, mdp_classe)
+        cdp_coffre.enregistrer(chemin_cf, coffre)
+        cfg = cdp_config.selectionner(config, [nom])[0]
+        cfg["coffre_propose"] = True
+        cdp_config.ajouter_ou_maj(config, cfg)
+        cdp_config.enregistrer(chemin_cfg, config)
+        print(vert(f"\nMot de passe de « {nom} » enregistré dans le coffre."))
+        return
+    if args.coffre_changer_mdp:
+        chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+        coffre = _charger_coffre(chemin_cf)
+        if not cdp_coffre.est_initialise(coffre):
+            print(jaune("\nLe coffre est vide, rien à changer."))
+            return
+        _assurer_dependances(("cryptography",))
+        ancien = demander("Mot de passe maître actuel", secret=True)
+        nouveau = demander("Nouveau mot de passe maître", secret=True)
+        try:
+            cdp_coffre.changer_mdp_maitre(coffre, ancien, nouveau)
+        except cdp_coffre.MotDePasseMaitreIncorrect:
+            print(rouge("\nMot de passe maître actuel incorrect."))
+            sys.exit(1)
+        cdp_coffre.enregistrer(chemin_cf, coffre)
+        print(vert("\nMot de passe maître du coffre changé."))
         return
 
     # Mono-classe : --url explicite, ou config vide → interactif mono-classe.

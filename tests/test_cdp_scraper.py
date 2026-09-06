@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cdp_scraper
 import cdp_viewer  # pour le test garde-fou de version (scraper == viewer)
+import cdp_config
+import cdp_coffre
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -555,6 +557,69 @@ class TestMainSelection(unittest.TestCase):
         traites = []
         self._run(["--tout"], traites)
         self.assertEqual(sorted(traites), ["mpsi", "pcsi"])
+
+
+class TestCommandesCoffre(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin_cfg = Path(self.tmp.name) / "config.json"
+        self.chemin_coffre = Path(self.tmp.name) / "coffre.json"
+        c = cdp_config._vide()
+        c["classes"].append({"nom": "mpsi", "url": "https://x/mpsi",
+                             "login": "l", "dossier": "cours_cdp"})
+        cdp_config.enregistrer(self.chemin_cfg, c)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, argv):
+        with mock.patch.object(cdp_scraper, "parse_args",
+                               return_value=cdp_scraper.parse_args(argv)), \
+             mock.patch.object(cdp_scraper, "verifier_accord"), \
+             mock.patch.object(cdp_scraper.cdp_config, "chemin_config",
+                               return_value=self.chemin_cfg):
+            cdp_scraper.main()
+
+    def test_coffre_ajouter_puis_lister(self):
+        with mock.patch.object(cdp_scraper, "demander",
+                               side_effect=["motmaitre", "secretclasse"]):
+            self._run(["--coffre-ajouter", "mpsi", "--coffre", str(self.chemin_coffre)])
+        coffre = cdp_coffre.charger(self.chemin_coffre)
+        self.assertEqual(cdp_coffre.recuperer(coffre, "motmaitre", "mpsi"), "secretclasse")
+        config = cdp_config.charger(self.chemin_cfg)
+        self.assertTrue(cdp_config.selectionner(config, ["mpsi"])[0]["coffre_propose"])
+
+    def test_coffre_ajouter_classe_absente_de_la_config(self):
+        with mock.patch.object(cdp_scraper, "demander") as demander_mock:
+            self._run(["--coffre-ajouter", "inconnue", "--coffre", str(self.chemin_coffre)])
+        demander_mock.assert_not_called()
+        self.assertFalse(self.chemin_coffre.is_file())
+
+    def test_coffre_lister_vide(self):
+        # Ne doit pas planter sans coffre existant ; pas d'assertion de sortie
+        # (afficher_coffre imprime sur stdout), on vérifie juste l'absence d'exception.
+        self._run(["--coffre-lister", "--coffre", str(self.chemin_coffre)])
+
+    def test_coffre_supprimer(self):
+        coffre = cdp_coffre._vide()
+        cdp_coffre.ajouter(coffre, "motmaitre", "mpsi", "secret")
+        cdp_coffre.enregistrer(self.chemin_coffre, coffre)
+        self._run(["--coffre-supprimer", "mpsi", "--coffre", str(self.chemin_coffre)])
+        self.assertFalse(cdp_coffre.contient(cdp_coffre.charger(self.chemin_coffre), "mpsi"))
+
+    def test_coffre_changer_mdp(self):
+        coffre = cdp_coffre._vide()
+        cdp_coffre.ajouter(coffre, "ancien", "mpsi", "secret")
+        cdp_coffre.enregistrer(self.chemin_coffre, coffre)
+        with mock.patch.object(cdp_scraper, "demander", side_effect=["ancien", "nouveau"]):
+            self._run(["--coffre-changer-mdp", "--coffre", str(self.chemin_coffre)])
+        relu = cdp_coffre.charger(self.chemin_coffre)
+        self.assertEqual(cdp_coffre.recuperer(relu, "nouveau", "mpsi"), "secret")
+
+    def test_coffre_changer_mdp_coffre_vide_ne_plante_pas(self):
+        with mock.patch.object(cdp_scraper, "demander") as demander_mock:
+            self._run(["--coffre-changer-mdp", "--coffre", str(self.chemin_coffre)])
+        demander_mock.assert_not_called()
 
 
 if __name__ == "__main__":
