@@ -48,7 +48,7 @@ class TestVersion(unittest.TestCase):
         self.assertEqual(cdp_scraper.__version__, cdp_viewer.__version__)
 
     def test_version_attendue(self):
-        self.assertEqual(cdp_scraper.__version__, "1.5.0")
+        self.assertEqual(cdp_scraper.__version__, "1.6.0")
 
 
 class TestAnalyserPage(unittest.TestCase):

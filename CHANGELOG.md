@@ -7,6 +7,23 @@ et le projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 La version est unique pour l'ensemble du projet : `cdp_scraper.py` et
 `cdp_viewer.py` portent le même numéro et sont publiés ensemble.
 
+## [1.6.0] - 2026-09-06
+
+### Ajouté
+- **Vérification et mise à jour** : le scraper et le viewer vérifient une
+  fois par jour au plus si une nouvelle version est publiée sur GitHub. Si
+  oui, proposent de mettre à jour sur place, sur confirmation explicite :
+  `git pull` pour une installation Git, ou remplacement atomique des
+  fichiers du projet pour une installation ZIP (jamais `cours_cdp/` ni
+  `.cdp-scraper/`, tout ou rien en cas d'échec réseau).
+  Flags `--sans-verif-maj` (scraper) / `--no-verif-maj` (viewer).
+- Nouveau module `cdp_maj.py` (stdlib pur, zéro dépendance ajoutée — y
+  compris pour le viewer).
+
+### Modifié
+- Le texte des conditions d'usage et la section RGPD du README reflètent la
+  vérification quotidienne auprès de GitHub.
+
 ## [1.5.0] - 2026-09-06
 
 ### Ajouté

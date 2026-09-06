@@ -609,8 +609,12 @@ AVERTISSEMENT = """\
  uniquement à la connexion directe au site. Si vous activez volontairement
  le coffre chiffré, votre mot de passe est chiffré localement (AES-256-GCM,
  clé dérivée d'un mot de passe maître que vous seul connaissez) et ne
- quitte jamais votre machine. Dans tous les cas : aucune collecte, aucun
- envoi vers un serveur externe au vôtre (RGPD).
+ quitte jamais votre machine. Une fois par jour au plus, le script vérifie
+ auprès de GitHub si une nouvelle version existe, et peut proposer de
+ mettre à jour les fichiers du projet sur votre confirmation explicite
+ (jamais cours_cdp/ ni le coffre). Aucune donnée personnelle n'y transite ;
+ désactivable avec --sans-verif-maj. En dehors de ces cas : aucune collecte,
+ aucun envoi vers un serveur externe au vôtre (RGPD).
 
 └────────────────────────────────────────────────────────────────────┘
 """

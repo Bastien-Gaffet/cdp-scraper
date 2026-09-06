@@ -39,10 +39,16 @@ Au **premier lancement**, ces conditions s'affichent et vous devez les accepter
 
 ### 🔒 Données personnelles (RGPD)
 
-- Vos **identifiants ne sont ni stockés ni transmis à un tiers**. Ils servent
-  uniquement à la requête de connexion **directe au site**.
-- Aucune donnée n'est envoyée vers un serveur externe : tout reste **entre
-  votre machine et cahier-de-prepa.fr**.
+- Vos **identifiants ne sont ni stockés ni transmis à un tiers** par défaut.
+  Ils servent uniquement à la requête de connexion **directe au site**. Si
+  vous activez volontairement le [coffre chiffré](#-coffre-de-mots-de-passe-optionnel),
+  votre mot de passe est chiffré localement et ne quitte jamais votre machine.
+- Une fois par jour au plus, le script vérifie auprès de **GitHub** (pas
+  cahier-de-prepa.fr) si une nouvelle version existe, et peut proposer de
+  mettre à jour les fichiers du projet sur votre confirmation explicite
+  (jamais `cours_cdp/` ni `.cdp-scraper/`). Aucune donnée personnelle n'y
+  transite ; désactivable avec `--sans-verif-maj` (scraper) /
+  `--no-verif-maj` (viewer).
 - Les fichiers téléchargés et les éventuels cookies de session restent **chez
   vous** ; le `.gitignore` fourni évite de les versionner par accident.
 
@@ -119,6 +125,7 @@ Principaux arguments :
 | `--coffre-supprimer NOM` | Retirer le mot de passe d'une classe du coffre. |
 | `--coffre-lister` | Afficher les classes ayant un mot de passe dans le coffre. |
 | `--coffre-changer-mdp` | Changer le mot de passe maître du coffre. |
+| `--sans-verif-maj` | Ne pas vérifier si une nouvelle version est disponible. |
 
 ### 🔄 Synchronisation intelligente
 
