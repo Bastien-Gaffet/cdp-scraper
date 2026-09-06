@@ -82,3 +82,66 @@ def chemin_coffre(override=None) -> Path:
 
 def est_initialise(coffre: dict) -> bool:
     return "kdf" in coffre and "temoin" in coffre
+
+
+_TEMOIN_CLAIR = b"cdp-coffre-ok"
+_SCRYPT_N = 16384
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_TAILLE_CLE = 32
+_TAILLE_SEL = 16
+_TAILLE_NONCE = 12
+
+
+def _derive_cle(mdp_maitre: str, sel: bytes) -> bytes:
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+    kdf = Scrypt(salt=sel, length=_TAILLE_CLE, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P)
+    return kdf.derive(mdp_maitre.encode("utf-8"))
+
+
+def _chiffrer(cle: bytes, associated_data: bytes, clair: bytes) -> dict:
+    import base64
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce = os.urandom(_TAILLE_NONCE)
+    chiffre = AESGCM(cle).encrypt(nonce, clair, associated_data)
+    return {
+        "nonce": base64.b64encode(nonce).decode("ascii"),
+        "chiffre": base64.b64encode(chiffre).decode("ascii"),
+    }
+
+
+def _dechiffrer(cle: bytes, associated_data: bytes, bloc: dict) -> bytes:
+    import base64
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce = base64.b64decode(bloc["nonce"])
+    chiffre = base64.b64decode(bloc["chiffre"])
+    try:
+        return AESGCM(cle).decrypt(nonce, chiffre, associated_data)
+    except InvalidTag:
+        raise MotDePasseMaitreIncorrect("Mot de passe maître incorrect.") from None
+
+
+def creer(mdp_maitre: str) -> dict:
+    """Nouveau coffre vide, avec un sel et un témoin fraîchement générés."""
+    import base64
+    coffre = _vide()
+    sel = os.urandom(_TAILLE_SEL)
+    coffre["kdf"] = {
+        "algorithme": "scrypt",
+        "sel": base64.b64encode(sel).decode("ascii"),
+        "n": _SCRYPT_N, "r": _SCRYPT_R, "p": _SCRYPT_P,
+    }
+    cle = _derive_cle(mdp_maitre, sel)
+    coffre["temoin"] = _chiffrer(cle, b"temoin", _TEMOIN_CLAIR)
+    return coffre
+
+
+def deverrouiller(coffre: dict, mdp_maitre: str) -> bytes:
+    """Dérive la clé et vérifie le témoin. Lève MotDePasseMaitreIncorrect si
+    le mot de passe maître est faux."""
+    import base64
+    sel = base64.b64decode(coffre["kdf"]["sel"])
+    cle = _derive_cle(mdp_maitre, sel)
+    _dechiffrer(cle, b"temoin", coffre["temoin"])
+    return cle

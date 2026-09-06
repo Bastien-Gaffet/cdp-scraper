@@ -95,5 +95,27 @@ class TestEstInitialise(unittest.TestCase):
         self.assertTrue(cdp_coffre.est_initialise(c))
 
 
+class TestCreerDeverrouiller(unittest.TestCase):
+    def test_creer_est_initialise(self):
+        c = cdp_coffre.creer("motmaitre")
+        self.assertTrue(cdp_coffre.est_initialise(c))
+        self.assertEqual(c["kdf"]["algorithme"], "scrypt")
+
+    def test_deverrouiller_bon_mot_de_passe(self):
+        c = cdp_coffre.creer("motmaitre")
+        cle = cdp_coffre.deverrouiller(c, "motmaitre")
+        self.assertEqual(len(cle), 32)
+
+    def test_deverrouiller_mauvais_mot_de_passe_leve(self):
+        c = cdp_coffre.creer("motmaitre")
+        with self.assertRaises(cdp_coffre.MotDePasseMaitreIncorrect):
+            cdp_coffre.deverrouiller(c, "autrechose")
+
+    def test_deux_coffres_ont_des_sels_differents(self):
+        c1 = cdp_coffre.creer("motmaitre")
+        c2 = cdp_coffre.creer("motmaitre")
+        self.assertNotEqual(c1["kdf"]["sel"], c2["kdf"]["sel"])
+
+
 if __name__ == "__main__":
     unittest.main()
