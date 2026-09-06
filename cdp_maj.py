@@ -118,3 +118,19 @@ def verifier_maj(version_locale: str, chemin_cache: Path, depot: str):
     if connue and _version_tuple(connue) > _version_tuple(version_locale):
         return connue
     return None
+
+
+def est_depot_git(dossier: Path) -> bool:
+    return (Path(dossier) / ".git").is_dir()
+
+
+def git_pull(dossier: Path):
+    """Lance `git pull` dans `dossier`. Renvoie (succès, message). Ne lève
+    jamais (git absent du PATH, timeout, etc. → (False, message))."""
+    try:
+        resultat = subprocess.run(
+            ["git", "pull"], cwd=dossier, capture_output=True, text=True, timeout=30)
+    except (subprocess.SubprocessError, OSError) as e:
+        return False, f"Échec de git pull : {e}"
+    sortie = (resultat.stdout + resultat.stderr).strip()
+    return resultat.returncode == 0, (sortie or "git pull terminé.")

@@ -2,6 +2,7 @@ import unittest
 from unittest import mock
 import sys
 import json
+import subprocess
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -189,6 +190,52 @@ class TestVerifierMaj(unittest.TestCase):
         self.assertEqual(resultat, "1.6.0")
         cache = cdp_maj.charger(self.chemin)
         self.assertNotEqual(cache["derniere_verif"], ancien_iso)
+
+
+class TestEstDepotGit(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dossier = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_avec_git(self):
+        (self.dossier / ".git").mkdir()
+        self.assertTrue(cdp_maj.est_depot_git(self.dossier))
+
+    def test_sans_git(self):
+        self.assertFalse(cdp_maj.est_depot_git(self.dossier))
+
+
+class TestGitPull(unittest.TestCase):
+    def test_succes(self):
+        resultat = subprocess.CompletedProcess(
+            args=["git", "pull"], returncode=0, stdout="Already up to date.\n", stderr="")
+        with mock.patch.object(cdp_maj.subprocess, "run", return_value=resultat):
+            ok, message = cdp_maj.git_pull(Path("."))
+        self.assertTrue(ok)
+        self.assertIn("Already up to date", message)
+
+    def test_code_retour_non_nul(self):
+        resultat = subprocess.CompletedProcess(
+            args=["git", "pull"], returncode=1, stdout="", stderr="conflit local")
+        with mock.patch.object(cdp_maj.subprocess, "run", return_value=resultat):
+            ok, message = cdp_maj.git_pull(Path("."))
+        self.assertFalse(ok)
+        self.assertIn("conflit local", message)
+
+    def test_git_absent_du_path(self):
+        with mock.patch.object(cdp_maj.subprocess, "run",
+                               side_effect=FileNotFoundError("git introuvable")):
+            ok, message = cdp_maj.git_pull(Path("."))
+        self.assertFalse(ok)
+
+    def test_timeout(self):
+        with mock.patch.object(cdp_maj.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired(cmd="git pull", timeout=30)):
+            ok, message = cdp_maj.git_pull(Path("."))
+        self.assertFalse(ok)
 
 
 if __name__ == "__main__":
