@@ -34,11 +34,13 @@ from datetime import datetime
 import cdp_manifeste
 import cdp_config
 import cdp_coffre
+import cdp_maj
 from urllib.parse import urljoin, urlsplit, unquote
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
+DEPOT_SLUG = "Bastien-Gaffet/cdp-scraper"
 KOFI = "https://ko-fi.com/G2G71YFHWX"
 
 # Fichier marquant que l'utilisateur a accepté les conditions d'usage.
@@ -707,6 +709,8 @@ Exemples :
                    help="Afficher les classes ayant un mot de passe dans le coffre puis quitter")
     p.add_argument("--coffre-changer-mdp", action="store_true",
                    help="Changer le mot de passe maître du coffre chiffré puis quitter")
+    p.add_argument("--sans-verif-maj", action="store_true",
+                   help="Ne pas vérifier si une nouvelle version est disponible")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
     return p.parse_args(argv)
 
@@ -979,6 +983,10 @@ def main():
 
     print(gras(cyan("\n══════════ Scraper cahier-de-prepa.fr ══════════\n")))
     print(dim(f"  Développé par Bastien Gaffet — soutenir : {KOFI}\n"))
+
+    if not args.sans_verif_maj:
+        cdp_maj.proposer_maj(__version__, cdp_maj.chemin_maj(), DEPOT_SLUG,
+                              Path(__file__).resolve().parent, _tty)
 
     # Conditions d'usage (affichées + acceptées une seule fois).
     verifier_accord(args.accepter_conditions)

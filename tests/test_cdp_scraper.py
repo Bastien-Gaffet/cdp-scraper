@@ -455,6 +455,45 @@ class TestArgsCoffre(unittest.TestCase):
         self.assertTrue(args.coffre_changer_mdp)
 
 
+class TestArgsVerifMaj(unittest.TestCase):
+    def test_flag_present(self):
+        args = cdp_scraper.parse_args(["--sans-verif-maj"])
+        self.assertTrue(args.sans_verif_maj)
+
+    def test_flag_absent_par_defaut(self):
+        args = cdp_scraper.parse_args([])
+        self.assertFalse(args.sans_verif_maj)
+
+
+class TestVerifMajScraper(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin_cfg = Path(self.tmp.name) / "config.json"
+        cdp_config.enregistrer(self.chemin_cfg, cdp_config._vide())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, argv):
+        with mock.patch.object(cdp_scraper, "parse_args",
+                               return_value=cdp_scraper.parse_args(argv + ["--config-lister"])), \
+             mock.patch.object(cdp_scraper, "verifier_accord"), \
+             mock.patch.object(cdp_scraper.cdp_config, "chemin_config",
+                               return_value=self.chemin_cfg), \
+             mock.patch.object(cdp_scraper.cdp_maj, "proposer_maj") as proposer_mock:
+            cdp_scraper.main()
+        return proposer_mock
+
+    def test_appelee_par_defaut(self):
+        proposer_mock = self._run([])
+        proposer_mock.assert_called_once()
+        self.assertEqual(proposer_mock.call_args[0][0], cdp_scraper.__version__)
+
+    def test_sans_verif_maj_desactive(self):
+        proposer_mock = self._run(["--sans-verif-maj"])
+        proposer_mock.assert_not_called()
+
+
 class TestIndicesMenu(unittest.TestCase):
     def test_vide_tous(self):
         self.assertEqual(cdp_scraper._indices_menu("", 3), [0, 1, 2])
