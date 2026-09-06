@@ -7,6 +7,20 @@ et le projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 La version est unique pour l'ensemble du projet : `cdp_scraper.py` et
 `cdp_viewer.py` portent le même numéro et sont publiés ensemble.
 
+## [1.5.0] - 2026-09-06
+
+### Ajouté
+- Viewer : rendu Markdown des fichiers `.md`/`.markdown` (titres, listes, tables,
+  citations, liens, images locales, code), via une route `/rendu/`. Bouton
+  « Voir la source » pour revenir au texte brut.
+- Viewer : coloration syntaxique des fichiers C, C++, Java, SQL, R, OCaml et
+  JSON dans la vue code (en plus de Python).
+
+### Sécurité
+- Le rendu Markdown échappe tout le contenu, n'émet qu'une liste blanche de
+  balises et assainit les URL (schémas http/https et chemins relatifs confinés ;
+  `javascript:`/`data:`/traversal neutralisés).
+
 ## [1.4.0] - 2026-09-06
 
 ### Ajouté

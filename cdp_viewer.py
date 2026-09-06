@@ -27,7 +27,7 @@ import cdp_manifeste
 import cdp_coloration
 import cdp_markdown
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 PAGE_HTML = r"""<!doctype html>
 <html lang="fr">
