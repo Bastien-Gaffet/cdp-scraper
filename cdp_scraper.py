@@ -36,7 +36,7 @@ import cdp_config
 import cdp_coffre
 from urllib.parse import urljoin, urlsplit, unquote
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
 
@@ -549,9 +549,12 @@ AVERTISSEMENT = """\
    • Rester mesuré : un seul flux de requêtes, option --delai pour
      ménager le serveur de l'association qui héberge le site.
 
- Vos identifiants ne sont JAMAIS stockés ni transmis à un tiers : ils
- servent seulement à la connexion directe au site (RGPD : aucune
- collecte, aucun envoi vers un serveur externe au vôtre).
+ Par défaut, vos identifiants ne sont jamais stockés : ils servent
+ uniquement à la connexion directe au site. Si vous activez volontairement
+ le coffre chiffré, votre mot de passe est chiffré localement (AES-256-GCM,
+ clé dérivée d'un mot de passe maître que vous seul connaissez) et ne
+ quitte jamais votre machine. Dans tous les cas : aucune collecte, aucun
+ envoi vers un serveur externe au vôtre (RGPD).
 
 └────────────────────────────────────────────────────────────────────┘
 """
