@@ -937,6 +937,12 @@ def main():
             return
         cdp_config.retirer(config, args.config_supprimer)
         cdp_config.enregistrer(chemin_cfg, config)
+        chemin_cf = cdp_coffre.chemin_coffre(args.coffre)
+        if chemin_cf.is_file():
+            coffre = _charger_coffre(chemin_cf)
+            if cdp_coffre.contient(coffre, args.config_supprimer):
+                cdp_coffre.retirer(coffre, args.config_supprimer)
+                cdp_coffre.enregistrer(chemin_cf, coffre)
         print(vert(f"\nClasse « {args.config_supprimer} » retirée de la config."))
         return
     if args.coffre_lister:

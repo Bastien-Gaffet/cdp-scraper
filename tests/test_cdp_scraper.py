@@ -621,6 +621,18 @@ class TestCommandesCoffre(unittest.TestCase):
             self._run(["--coffre-changer-mdp", "--coffre", str(self.chemin_coffre)])
         demander_mock.assert_not_called()
 
+    def test_config_supprimer_retire_aussi_le_coffre(self):
+        coffre = cdp_coffre._vide()
+        cdp_coffre.ajouter(coffre, "motmaitre", "mpsi", "secret")
+        cdp_coffre.enregistrer(self.chemin_coffre, coffre)
+        self._run(["--config-supprimer", "mpsi", "--coffre", str(self.chemin_coffre)])
+        self.assertFalse(cdp_coffre.contient(cdp_coffre.charger(self.chemin_coffre), "mpsi"))
+
+    def test_config_supprimer_sans_coffre_ne_plante_pas(self):
+        # Aucun fichier coffre.json : la cascade de suppression doit rester silencieuse.
+        self._run(["--config-supprimer", "mpsi", "--coffre", str(self.chemin_coffre)])
+        self.assertFalse(self.chemin_coffre.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
