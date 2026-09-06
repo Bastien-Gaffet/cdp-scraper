@@ -134,3 +134,58 @@ def git_pull(dossier: Path):
         return False, f"Échec de git pull : {e}"
     sortie = (resultat.stdout + resultat.stderr).strip()
     return resultat.returncode == 0, (sortie or "git pull terminé.")
+
+
+def lister_fichiers_maj(depot: str, tag: str, timeout: float = 5.0):
+    """GET /repos/<depot>/contents?ref=<tag>. Renvoie la liste des fichiers
+    pertinents à mettre à jour ([{"nom": ..., "download_url": ...}, ...]),
+    ou None en cas d'erreur."""
+    url = f"https://api.github.com/repos/{depot}/contents?ref={tag}"
+    requete = urllib.request.Request(url, headers={"User-Agent": "cdp-scraper"})
+    try:
+        with urllib.request.urlopen(requete, timeout=timeout) as reponse:
+            entrees = json.loads(reponse.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(entrees, list):
+        return None
+
+    fichiers = []
+    for entree in entrees:
+        if not isinstance(entree, dict) or entree.get("type") != "file":
+            continue
+        nom = entree.get("name", "")
+        if nom.endswith(EXTENSIONS_MAJ) or nom in FICHIERS_MAJ:
+            url_dl = entree.get("download_url")
+            if url_dl:
+                fichiers.append({"nom": nom, "download_url": url_dl})
+    return fichiers
+
+
+def telecharger_fichiers(fichiers: list, timeout: float = 10.0):
+    """Télécharge chaque download_url en mémoire. Un seul échec → None (rien
+    n'est renvoyé, même partiellement)."""
+    contenus = {}
+    for f in fichiers:
+        requete = urllib.request.Request(f["download_url"], headers={"User-Agent": "cdp-scraper"})
+        try:
+            with urllib.request.urlopen(requete, timeout=timeout) as reponse:
+                contenus[f["nom"]] = reponse.read()
+        except OSError:
+            return None
+    return contenus
+
+
+def appliquer_maj(dossier: Path, fichiers: dict) -> None:
+    """Écrit chaque fichier de `fichiers` dans `dossier`, atomiquement.
+    Rejette tout nom contenant un séparateur de chemin ou une remontée de
+    répertoire (défense en profondeur : la liste blanche en amont ne devrait
+    jamais en produire, mais appliquer_maj ne fait confiance à personne)."""
+    dossier = Path(dossier)
+    for nom, contenu in fichiers.items():
+        if "/" in nom or "\\" in nom or nom in ("..", "."):
+            continue
+        cible = dossier / nom
+        tmp = cible.with_name(cible.name + ".part")
+        tmp.write_bytes(contenu)
+        os.replace(tmp, cible)

@@ -238,5 +238,77 @@ class TestGitPull(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class TestListerFichiersMaj(unittest.TestCase):
+    CONTENU_API = [
+        {"name": "cdp_scraper.py", "type": "file", "download_url": "https://raw/cdp_scraper.py"},
+        {"name": "tests", "type": "dir", "download_url": None},
+        {"name": ".github", "type": "dir", "download_url": None},
+        {"name": "image.png", "type": "file", "download_url": "https://raw/image.png"},
+        {"name": "README.md", "type": "file", "download_url": "https://raw/README.md"},
+        {"name": "requirements.txt", "type": "file", "download_url": "https://raw/requirements.txt"},
+    ]
+
+    def test_filtre_les_fichiers_pertinents(self):
+        corps = json.dumps(self.CONTENU_API).encode("utf-8")
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               return_value=_FausseReponse(corps)):
+            fichiers = cdp_maj.lister_fichiers_maj("owner/repo", "v1.6.0")
+        noms = {f["nom"] for f in fichiers}
+        self.assertEqual(noms, {"cdp_scraper.py", "README.md", "requirements.txt"})
+
+    def test_erreur_reseau_renvoie_none(self):
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               side_effect=TimeoutError()):
+            self.assertIsNone(cdp_maj.lister_fichiers_maj("owner/repo", "v1.6.0"))
+
+    def test_json_invalide_renvoie_none(self):
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               return_value=_FausseReponse(b"pas du json")):
+            self.assertIsNone(cdp_maj.lister_fichiers_maj("owner/repo", "v1.6.0"))
+
+
+class TestTelechargerFichiers(unittest.TestCase):
+    def test_tous_reussissent(self):
+        fichiers = [{"nom": "a.py", "download_url": "https://raw.example/a.py"},
+                   {"nom": "b.py", "download_url": "https://raw.example/b.py"}]
+        reponses = [_FausseReponse(b"contenu-a"), _FausseReponse(b"contenu-b")]
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen", side_effect=reponses):
+            resultat = cdp_maj.telecharger_fichiers(fichiers)
+        self.assertEqual(resultat, {"a.py": b"contenu-a", "b.py": b"contenu-b"})
+
+    def test_un_seul_echec_annule_tout(self):
+        fichiers = [{"nom": "a.py", "download_url": "https://raw.example/a.py"},
+                   {"nom": "b.py", "download_url": "https://raw.example/b.py"}]
+        with mock.patch.object(cdp_maj.urllib.request, "urlopen",
+                               side_effect=[_FausseReponse(b"contenu-a"), TimeoutError()]):
+            resultat = cdp_maj.telecharger_fichiers(fichiers)
+        self.assertIsNone(resultat)
+
+
+class TestAppliquerMaj(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dossier = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_ecrit_les_fichiers(self):
+        cdp_maj.appliquer_maj(self.dossier, {"a.py": b"contenu-a", "README.md": b"contenu-b"})
+        self.assertEqual((self.dossier / "a.py").read_bytes(), b"contenu-a")
+        self.assertEqual((self.dossier / "README.md").read_bytes(), b"contenu-b")
+
+    def test_pas_de_part_residuel(self):
+        cdp_maj.appliquer_maj(self.dossier, {"a.py": b"x"})
+        self.assertEqual(list(self.dossier.glob("*.part")), [])
+
+    def test_rejette_les_noms_avec_separateur_de_chemin(self):
+        cdp_maj.appliquer_maj(self.dossier, {"../evil.py": b"x", "sub/evil.py": b"y",
+                                             "bon.py": b"z"})
+        self.assertFalse((self.dossier.parent / "evil.py").exists())
+        self.assertFalse((self.dossier / "sub").exists())
+        self.assertTrue((self.dossier / "bon.py").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
