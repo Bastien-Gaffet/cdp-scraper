@@ -221,7 +221,11 @@ naviguez dans l'arbre à gauche, l'aperçu s'affiche à droite.
   serveur avec le module standard `tokenize` : aucune dépendance, fonctionne
   hors-ligne). Un bouton **« Lancer sur la machine »** ouvre le script dans un
   IDE installé (VS Code, PyCharm, Sublime, Thonny, Spyder…) ou, à défaut,
-  l'exécute dans un terminal.
+  l'exécute dans un terminal. La coloration couvre aussi **C, C++, Java, SQL,
+  R, OCaml et JSON**.
+- Les fichiers **Markdown** (`.md`/`.markdown`) s'affichent **formatés**
+  (titres, listes, tableaux, citations, liens, images locales, code) via un
+  bouton **« Voir la source »** pour revenir au texte brut à tout moment.
 - Les fichiers **GeoGebra** (`.ggb`) s'ouvrent dans un nouvel onglet via
   **GeoGebra en ligne** ; en l'absence d'Internet, repli sur l'**application
   installée** sur le PC, puis à défaut sur l'**explorateur de fichiers**.

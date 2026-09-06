@@ -212,6 +212,9 @@ class TestServeur(unittest.TestCase):
         (maths / "cours.pdf").write_bytes(b"%PDF-1.4 contenu")
         (maths / "figure.ggb").write_bytes(b"PK\x03\x04 ggb")
         (maths / "script.py").write_text("import os\nprint('hello')\n")
+        (maths / "notes.md").write_text(
+            "# Cours\n\nUn **point** important.\n\n- a\n- b\n", encoding="utf-8")
+        (maths / "prog.c").write_text("int main(void){return 0;}\n", encoding="utf-8")
         (cls.racine / "secret.txt").write_text("hors classe")
 
         cls.serveur = cdp_viewer.creer_serveur(cls.racine, port=0)
@@ -303,6 +306,33 @@ class TestServeur(unittest.TestCase):
         # Bouton de lancement + URL /lancer/ pointant vers le script.
         self.assertIn('id="lancer"', html)
         self.assertIn("/lancer/PCSI/Maths/script.py", html)
+
+    def test_rendu_md_html(self):
+        with self._get("/rendu/PCSI/Maths/notes.md") as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers["Content-Type"], "text/html; charset=utf-8")
+            page = r.read().decode("utf-8")
+        self.assertIn("<h1>Cours</h1>", page)
+        self.assertIn("<strong>point</strong>", page)
+        self.assertIn("<li>a</li>", page)
+        self.assertIn("/file/PCSI/Maths/notes.md", page)  # lien « voir la source »
+
+    def test_rendu_md_traversal_403(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/rendu/../secret.txt")
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_rendu_md_inexistant_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/rendu/PCSI/Maths/absent.md")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_code_c_colore(self):
+        with self._get("/code/PCSI/Maths/prog.c") as r:
+            self.assertEqual(r.status, 200)
+            page = r.read().decode("utf-8")
+        self.assertIn('class="kw"', page)
+        self.assertNotIn('id="lancer"', page.split("</style>")[0])  # bouton masqué côté JS
 
     def test_lancer_appelle_lancer_python(self):
         with mock.patch.object(cdp_viewer, "lancer_python",
@@ -400,7 +430,7 @@ class TestVersionCLI(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0)
         # argparse action="version" écrit sur stdout (3.4+) ; on couvre les deux flux.
-        self.assertIn("cdp-viewer 1.4.0", res.stdout + res.stderr)
+        self.assertIn("cdp-viewer 1.5.0", res.stdout + res.stderr)
 
 
 class TestPageErreur(unittest.TestCase):
