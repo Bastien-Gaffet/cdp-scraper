@@ -25,7 +25,7 @@ from pathlib import Path
 
 import cdp_manifeste
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 PAGE_HTML = r"""<!doctype html>
 <html lang="fr">
