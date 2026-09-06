@@ -468,5 +468,43 @@ class TestNavigationClavier(unittest.TestCase):
         self.assertIn(".ligne.actif", p)
 
 
+class TestVerifMajViewer(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dossier = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    class _FauxServeur:
+        server_address = ("127.0.0.1", 0)
+
+        def serve_forever(self):
+            raise KeyboardInterrupt()
+
+        def shutdown(self):
+            pass
+
+        def server_close(self):
+            pass
+
+    def _run(self, argv):
+        argv = ["cdp_viewer.py", "--dossier", str(self.dossier), "--no-browser"] + argv
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(cdp_viewer, "creer_serveur", return_value=self._FauxServeur()), \
+             mock.patch.object(cdp_viewer.cdp_maj, "proposer_maj") as proposer_mock:
+            cdp_viewer.main()
+        return proposer_mock
+
+    def test_appelee_par_defaut(self):
+        proposer_mock = self._run([])
+        proposer_mock.assert_called_once()
+        self.assertEqual(proposer_mock.call_args[0][0], cdp_viewer.__version__)
+
+    def test_no_verif_maj_desactive(self):
+        proposer_mock = self._run(["--no-verif-maj"])
+        proposer_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

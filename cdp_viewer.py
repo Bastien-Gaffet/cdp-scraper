@@ -26,8 +26,15 @@ from pathlib import Path
 import cdp_manifeste
 import cdp_coloration
 import cdp_markdown
+import cdp_maj
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
+DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
+DEPOT_SLUG = "Bastien-Gaffet/cdp-scraper"
+
+
+def _tty() -> bool:
+    return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 PAGE_HTML = r"""<!doctype html>
 <html lang="fr">
@@ -1232,6 +1239,8 @@ def main():
                    help="Port d'écoute (défaut : 8000)")
     p.add_argument("--no-browser", action="store_true",
                    help="Ne pas ouvrir le navigateur automatiquement")
+    p.add_argument("--no-verif-maj", action="store_true",
+                   help="Ne pas vérifier si une nouvelle version est disponible")
     p.add_argument("--version", action="version",
                    version=f"cdp-viewer {__version__}")
     args = p.parse_args()
@@ -1245,6 +1254,9 @@ def main():
     serveur = creer_serveur(racine, args.port)
     url = f"http://127.0.0.1:{serveur.server_address[1]}"
     print(f"cdp-viewer en écoute sur {url}  (Ctrl+C pour arrêter)")
+    if not args.no_verif_maj:
+        cdp_maj.proposer_maj(__version__, cdp_maj.chemin_maj(), DEPOT_SLUG,
+                              Path(__file__).resolve().parent, _tty)
     if not args.no_browser:
         webbrowser.open(url)
     try:
