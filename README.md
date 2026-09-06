@@ -113,6 +113,11 @@ Principaux arguments :
 | `--tout` | Traiter toutes les classes mémorisées, sans menu. |
 | `--config-lister` | Afficher les classes mémorisées puis quitter. |
 | `--config-supprimer NOM` | Retirer une classe de la config puis quitter. |
+| `--coffre CHEMIN` | Chemin du fichier de coffre chiffré (défaut : `.cdp-scraper/coffre.json`). |
+| `--coffre-ajouter NOM` | Enregistrer le mot de passe d'une classe mémorisée dans le coffre. |
+| `--coffre-supprimer NOM` | Retirer le mot de passe d'une classe du coffre. |
+| `--coffre-lister` | Afficher les classes ayant un mot de passe dans le coffre. |
+| `--coffre-changer-mdp` | Changer le mot de passe maître du coffre. |
 
 ### 🔄 Synchronisation intelligente
 
@@ -150,6 +155,45 @@ python cdp_scraper.py --config-lister
 Le fichier de config est cherché dans `./.cdp-scraper/config.json` (s'il existe),
 sinon dans `~/.cdp-scraper/config.json`. Le **mot de passe n'est jamais stocké**
 et reste demandé à chaque lancement (un par classe).
+
+### 🔐 Coffre de mots de passe (optionnel)
+
+Retaper un mot de passe à chaque run devient vite pénible avec plusieurs
+classes. Le coffre chiffré résout ça, en restant **désactivé par défaut**.
+
+Après le traitement d'une classe déjà mémorisée, le scraper propose :
+
+```
+Enregistrer le mot de passe de « mpsi » dans le coffre chiffré ?
+  [o] Oui, l'enregistrer maintenant
+  [n] Non, redemander la prochaine fois   (défaut)
+  [j] Non, ne plus jamais demander pour cette classe
+```
+
+En répondant **o**, vous choisissez un **mot de passe maître** : le mot de
+passe de la classe est alors chiffré (AES-256-GCM, clé dérivée par Scrypt)
+dans `.cdp-scraper/coffre.json`. Au prochain run avec plusieurs classes,
+une seule question suffit :
+
+```bash
+python cdp_scraper.py --tout
+# « Utiliser le coffre chiffré pour déverrouiller les mots de passe enregistrés ? »
+```
+
+Un mot de passe maître incorrect est toléré 3 fois avant un repli automatique
+sur la saisie manuelle. Commandes de gestion :
+
+```bash
+python cdp_scraper.py --coffre-ajouter mpsi       # activer plus tard pour une classe
+python cdp_scraper.py --coffre-supprimer mpsi     # désactiver
+python cdp_scraper.py --coffre-lister             # voir quelles classes sont enregistrées
+python cdp_scraper.py --coffre-changer-mdp        # changer le mot de passe maître
+```
+
+> ⚠️ Le coffre protège contre un accès **occasionnel** au fichier (clé USB
+> perdue, dossier partagé par erreur) — pas contre quelqu'un ayant un accès
+> complet et prolongé à votre machine déjà déverrouillée. Utilisez un mot de
+> passe maître **différent** de votre mot de passe cahier-de-prepa.
 
 📖 **Documentation complète** (tous les arguments, fonctionnement du crawl,
 programmes de colles, mode simulation) : [docs/cdp_scraper_doc.md](docs/cdp_scraper_doc.md).
