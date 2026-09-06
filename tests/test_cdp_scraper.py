@@ -634,5 +634,127 @@ class TestCommandesCoffre(unittest.TestCase):
         self.assertFalse(self.chemin_coffre.exists())
 
 
+class TestDecisionCoffre(unittest.TestCase):
+    def test_o_enregistrer(self):
+        self.assertEqual(cdp_scraper.decision_coffre("o"), "enregistrer")
+        self.assertEqual(cdp_scraper.decision_coffre("O"), "enregistrer")
+
+    def test_j_jamais(self):
+        self.assertEqual(cdp_scraper.decision_coffre("j"), "jamais")
+
+    def test_n_ou_vide_ou_autre_plus_tard(self):
+        for reponse in ("n", "", "x", "  "):
+            self.assertEqual(cdp_scraper.decision_coffre(reponse), "plus_tard")
+
+
+class TestProposerCoffre(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin_cfg = Path(self.tmp.name) / "config.json"
+        self.chemin_coffre = Path(self.tmp.name) / "coffre.json"
+        self.config = cdp_config._vide()
+        self.cfg = {"nom": "mpsi", "url": "https://x/mpsi", "login": "l", "dossier": "cours_cdp"}
+        cdp_config.ajouter_ou_maj(self.config, self.cfg)
+        cdp_config.enregistrer(self.chemin_cfg, self.config)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_deja_tranche_ne_redemande_pas(self):
+        cfg = dict(self.cfg, coffre_propose=True)
+        with mock.patch.object(cdp_scraper, "_tty", return_value=True), \
+             mock.patch("builtins.input") as input_mock:
+            cdp_scraper.proposer_coffre(self.config, self.chemin_cfg, cfg, "secret",
+                                        str(self.chemin_coffre))
+        input_mock.assert_not_called()
+
+    def test_hors_tty_ne_demande_rien(self):
+        with mock.patch.object(cdp_scraper, "_tty", return_value=False), \
+             mock.patch("builtins.input") as input_mock:
+            cdp_scraper.proposer_coffre(self.config, self.chemin_cfg, self.cfg, "secret",
+                                        str(self.chemin_coffre))
+        input_mock.assert_not_called()
+
+    def test_choix_o_enregistre_et_marque_propose(self):
+        with mock.patch.object(cdp_scraper, "_tty", return_value=True), \
+             mock.patch("builtins.input", return_value="o"), \
+             mock.patch.object(cdp_scraper, "demander", return_value="motmaitre"):
+            cdp_scraper.proposer_coffre(self.config, self.chemin_cfg, self.cfg, "secretclasse",
+                                        str(self.chemin_coffre))
+        coffre = cdp_coffre.charger(self.chemin_coffre)
+        self.assertEqual(cdp_coffre.recuperer(coffre, "motmaitre", "mpsi"), "secretclasse")
+        config_relue = cdp_config.charger(self.chemin_cfg)
+        self.assertTrue(cdp_config.selectionner(config_relue, ["mpsi"])[0]["coffre_propose"])
+
+    def test_choix_n_ne_marque_rien(self):
+        with mock.patch.object(cdp_scraper, "_tty", return_value=True), \
+             mock.patch("builtins.input", return_value="n"):
+            cdp_scraper.proposer_coffre(self.config, self.chemin_cfg, self.cfg, "secret",
+                                        str(self.chemin_coffre))
+        config_relue = cdp_config.charger(self.chemin_cfg)
+        self.assertNotIn("coffre_propose", cdp_config.selectionner(config_relue, ["mpsi"])[0])
+        self.assertFalse(self.chemin_coffre.exists())
+
+    def test_choix_j_marque_sans_enregistrer(self):
+        with mock.patch.object(cdp_scraper, "_tty", return_value=True), \
+             mock.patch("builtins.input", return_value="j"):
+            cdp_scraper.proposer_coffre(self.config, self.chemin_cfg, self.cfg, "secret",
+                                        str(self.chemin_coffre))
+        config_relue = cdp_config.charger(self.chemin_cfg)
+        self.assertTrue(cdp_config.selectionner(config_relue, ["mpsi"])[0]["coffre_propose"])
+        self.assertFalse(self.chemin_coffre.exists())
+
+    def test_reutilise_mdp_maitre_deja_connu_sans_redemander(self):
+        with mock.patch.object(cdp_scraper, "_tty", return_value=True), \
+             mock.patch("builtins.input", return_value="o"), \
+             mock.patch.object(cdp_scraper, "demander") as demander_mock:
+            cdp_scraper.proposer_coffre(self.config, self.chemin_cfg, self.cfg, "secretclasse",
+                                        str(self.chemin_coffre), mdp_maitre_connu="motmaitre")
+        demander_mock.assert_not_called()
+        coffre = cdp_coffre.charger(self.chemin_coffre)
+        self.assertEqual(cdp_coffre.recuperer(coffre, "motmaitre", "mpsi"), "secretclasse")
+
+
+class TestRunClasseUniqueProposeCoffre(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin_cfg = Path(self.tmp.name) / "config.json"
+        self.config = cdp_config._vide()
+        cdp_config.ajouter_ou_maj(self.config, {
+            "nom": "mpsi", "url": "https://cahier-de-prepa.fr/mpsi",
+            "login": "l", "dossier": "cours_cdp",
+        })
+        cdp_config.enregistrer(self.chemin_cfg, self.config)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _args(self, mdp=None):
+        return types.SimpleNamespace(url="https://cahier-de-prepa.fr/mpsi", login="l", mdp=mdp,
+                                     sortie="cours_cdp", simulation=False, reprise=False,
+                                     coffre=None)
+
+    def test_classe_deja_connue_relancee_par_url_propose_le_coffre(self):
+        # Cas réel signalé : une classe mémorisée avant l'existence du coffre,
+        # relancée via --url (pas de config vide) — doit quand même déclencher
+        # proposer_coffre après un traitement réussi.
+        with mock.patch.object(cdp_scraper, "demander", return_value="secretclasse"), \
+             mock.patch.object(cdp_scraper, "traiter_classe",
+                               return_value={"nom": "mpsi", "ok": True, "compteur": {}, "volume": {}}), \
+             mock.patch.object(cdp_scraper, "proposer_coffre") as proposer_mock:
+            cdp_scraper.run_classe_unique(self._args(), self.config, self.chemin_cfg)
+        proposer_mock.assert_called_once()
+        _, _, cfg_arg, mdp_arg, _ = proposer_mock.call_args[0]
+        self.assertEqual(cfg_arg["nom"], "mpsi")
+        self.assertEqual(mdp_arg, "secretclasse")
+
+    def test_mdp_impose_n_appelle_pas_proposer_coffre(self):
+        with mock.patch.object(cdp_scraper, "traiter_classe",
+                               return_value={"nom": "mpsi", "ok": True, "compteur": {}, "volume": {}}), \
+             mock.patch.object(cdp_scraper, "proposer_coffre") as proposer_mock:
+            cdp_scraper.run_classe_unique(self._args(mdp="impose"), self.config, self.chemin_cfg)
+        proposer_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

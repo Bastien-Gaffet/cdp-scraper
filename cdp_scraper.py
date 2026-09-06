@@ -528,6 +528,59 @@ def normaliser_url(url: str) -> str:
         url = "https://" + url
     return url.rstrip("/")
 
+
+def _tty() -> bool:
+    return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+
+def decision_coffre(choix: str) -> str:
+    """Normalise la réponse à la question d'activation du coffre.
+    Renvoie 'enregistrer', 'jamais' ou 'plus_tard' (défaut, y compris pour
+    une réponse vide ou invalide)."""
+    c = choix.strip().lower()
+    if c == "o":
+        return "enregistrer"
+    if c == "j":
+        return "jamais"
+    return "plus_tard"
+
+
+def proposer_coffre(config: dict, chemin_cfg, cfg: dict, mdp: str,
+                     chemin_coffre_override=None, mdp_maitre_connu=None) -> None:
+    """Propose une seule fois (par classe) d'enregistrer `mdp` dans le coffre
+    chiffré. Ne fait rien si déjà tranché (`coffre_propose`) ou hors terminal
+    interactif. Met à jour et enregistre `config` selon la réponse.
+
+    `mdp_maitre_connu` : si un mot de passe maître a déjà été validé plus tôt
+    dans le même run (déverrouillage du coffre en boucle multi-classes), on le
+    réutilise au lieu de le redemander — un seul mot de passe maître par run."""
+    if cfg.get("coffre_propose") or not _tty():
+        return
+    nom = cfg["nom"]
+    print(f"\nEnregistrer le mot de passe de « {nom} » dans le coffre chiffré ?")
+    print("  [o] Oui, l'enregistrer maintenant")
+    print("  [n] Non, redemander la prochaine fois   (défaut)")
+    print("  [j] Non, ne plus jamais demander pour cette classe")
+    decision = decision_coffre(input("Choix [o/n/j] : "))
+
+    if decision == "plus_tard":
+        return
+
+    if decision == "enregistrer":
+        _assurer_dependances(("cryptography",))
+        chemin_cf = cdp_coffre.chemin_coffre(chemin_coffre_override)
+        coffre = _charger_coffre(chemin_cf)
+        mdp_maitre = mdp_maitre_connu or demander("Mot de passe maître du coffre", secret=True)
+        cdp_coffre.ajouter(coffre, mdp_maitre, nom, mdp)
+        cdp_coffre.enregistrer(chemin_cf, coffre)
+        print(vert(f"Mot de passe de « {nom} » enregistré dans le coffre."))
+    else:  # "jamais"
+        print(dim(f"  Vous pourrez l'activer plus tard avec --coffre-ajouter {nom}."))
+
+    cfg["coffre_propose"] = True
+    cdp_config.ajouter_ou_maj(config, cfg)
+    cdp_config.enregistrer(chemin_cfg, config)
+
 # ─── Conditions d'usage (acceptation au premier lancement) ────────────────────
 
 AVERTISSEMENT = """\
@@ -905,14 +958,19 @@ def run_classe_unique(args, config, chemin_cfg):
     cfg = {"nom": nom, "url": url, "login": login, "dossier": sortie}
     resume = traiter_classe(cfg, args, mdp, simulation)
 
-    if (resume.get("ok") and not args.reprise and interactif
-            and not cdp_config.contient(config, nom)):
+    deja_connue = cdp_config.contient(config, nom)
+    if resume.get("ok") and not args.reprise and interactif and not deja_connue:
         if demander_oui_non(
                 f"Mémoriser la classe « {nom} » dans la config ? (jamais le mot de passe)",
                 defaut=True):
             cdp_config.ajouter_ou_maj(config, cfg)
             cdp_config.enregistrer(chemin_cfg, config)
             print(vert(f"Classe « {nom} » mémorisée dans {chemin_cfg}."))
+            deja_connue = True
+
+    if resume.get("ok") and deja_connue and not args.mdp:
+        cfg_actuelle = cdp_config.selectionner(config, [nom])[0]
+        proposer_coffre(config, chemin_cfg, cfg_actuelle, mdp, args.coffre)
 
 
 def main():
