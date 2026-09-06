@@ -1232,6 +1232,7 @@ def main():
     if not racine.is_dir():
         print(f"Dossier introuvable : {racine.resolve()}")
         print("Lancez d'abord cdp_scraper.py, ou indiquez --dossier <chemin>.")
+        sys.exit(1)
 
     serveur = creer_serveur(racine, args.port)
     url = f"http://127.0.0.1:{serveur.server_address[1]}"
