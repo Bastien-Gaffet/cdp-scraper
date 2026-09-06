@@ -1,6 +1,7 @@
 # 📚 cdp-scraper
 
 [![Licence : CeCILL-2.1](https://img.shields.io/badge/Licence-CeCILL--2.1-blue.svg)](LICENSE)
+[![Soutenir sur Ko-fi](https://img.shields.io/badge/Ko--fi-Soutenir%20le%20projet-8833ff?logo=ko-fi&logoColor=white)](https://ko-fi.com/G2G71YFHWX)
 
 > Sauvegarde personnelle de **vos** documents sur [cahier-de-prepa.fr](https://cahier-de-prepa.fr).
 
@@ -247,3 +248,9 @@ Le logiciel *Cahier de prépa* est un projet indépendant de Cyril Ravat,
 Les retours et contributions sont bienvenus via *issues* et *pull requests*.
 Merci de ne **jamais** inclure de documents de cours, d'identifiants ou de
 cookies dans une contribution.
+
+## ☕ Soutenir le projet
+
+Développé par [Bastien Gaffet](https://github.com/Bastien-Gaffet). Si `cdp-scraper`
+vous a été utile, vous pouvez soutenir son développement sur
+[Ko-fi](https://ko-fi.com/G2G71YFHWX).

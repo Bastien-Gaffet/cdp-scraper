@@ -90,6 +90,10 @@ main { flex:1; display:flex; min-height:0; }
 .vide { color:var(--muted); padding:24px 0; }
 #theme { display:inline-flex; align-items:center; }
 .fil a, .fil .courant { display:inline-flex; align-items:center; gap:4px; }
+#pied { padding:6px 14px; font-size:12px; text-align:center; color:var(--muted);
+  background:var(--panel); border-top:1px solid var(--border); flex-shrink:0; }
+#pied a { color:var(--muted); }
+#pied a:hover { color:var(--accent); text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -103,6 +107,10 @@ main { flex:1; display:flex; min-height:0; }
   <nav id="rubriques"></nav>
   <section id="explorateur"></section>
 </main>
+<footer id="pied">
+  Développé par Bastien Gaffet —
+  <a href="https://ko-fi.com/G2G71YFHWX" target="_blank" rel="noopener">soutenir cdp-viewer sur Ko-fi</a>
+</footer>
 <script>
 const elRubriques = document.getElementById("rubriques");
 const elExplorateur = document.getElementById("explorateur");

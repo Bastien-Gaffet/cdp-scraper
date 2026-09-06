@@ -39,6 +39,7 @@ from urllib.parse import urljoin, urlsplit, unquote
 __version__ = "1.5.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
+KOFI = "https://ko-fi.com/G2G71YFHWX"
 
 # Fichier marquant que l'utilisateur a accepté les conditions d'usage.
 ACCORD_FICHIER = Path.home() / ".cdp-scraper" / "accord.txt"
@@ -977,6 +978,7 @@ def main():
     args = parse_args()
 
     print(gras(cyan("\n══════════ Scraper cahier-de-prepa.fr ══════════\n")))
+    print(dim(f"  Développé par Bastien Gaffet — soutenir : {KOFI}\n"))
 
     # Conditions d'usage (affichées + acceptées une seule fois).
     verifier_accord(args.accepter_conditions)
