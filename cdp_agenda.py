@@ -172,3 +172,74 @@ def filtrer_ds(evenements: list) -> list:
     contient 'surveille' — couvre le nom par défaut "Devoir surveillé" sans
     exiger une correspondance exacte."""
     return [e for e in evenements if 'surveille' in _normaliser(e['type'])]
+
+
+from datetime import timedelta, timezone
+
+DUREE_DEFAUT_HEURES = 4
+
+
+def _echapper_ics(texte: str) -> str:
+    texte = texte.replace('\\', '\\\\')
+    texte = texte.replace(';', '\\;').replace(',', '\\,')
+    texte = texte.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\\n')
+    return texte
+
+
+def _plier_ligne(ligne: str) -> str:
+    """Plie une ligne ICS à 75 octets UTF-8 (RFC 5545) : chaque ligne de
+    continuation commence par une espace, jamais de coupure au milieu d'un
+    caractère UTF-8 multioctet."""
+    donnees = ligne.encode('utf-8')
+    if len(donnees) <= 75:
+        return ligne
+    morceaux = []
+    depart = 0
+    limite = 75
+    while depart < len(donnees):
+        fin = min(depart + limite, len(donnees))
+        while fin < len(donnees) and (donnees[fin] & 0xC0) == 0x80:
+            fin -= 1
+        morceaux.append(donnees[depart:fin])
+        depart = fin
+        limite = 74  # la ligne de continuation commence par une espace (1 octet)
+    return '\r\n '.join(m.decode('utf-8') for m in morceaux)
+
+
+def _slug(nom: str) -> str:
+    s = unicodedata.normalize('NFKD', nom).encode('ascii', 'ignore').decode('ascii')
+    s = re.sub(r'[^A-Za-z0-9]+', '-', s).strip('-').lower()
+    return s or 'classe'
+
+
+def generer_ics(evenements: list, nom_classe: str) -> str:
+    """RFC 5545 minimal : un VCALENDAR contenant un VEVENT par événement,
+    trié par date de début. Pas de VTIMEZONE embarqué (TZID=Europe/Paris,
+    reconnu tel quel par les grands clients dont Google Calendar)."""
+    horodatage = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    slug_classe = _slug(nom_classe)
+    lignes = ['BEGIN:VCALENDAR', 'VERSION:2.0',
+             'PRODID:-//cdp-scraper//Agenda//FR', 'CALSCALE:GREGORIAN']
+    for ev in sorted(evenements, key=lambda e: e['debut']):
+        resume = f"{ev['type']} en {ev['matiere']}" if ev['matiere'] else ev['type']
+        description = ev.get('texte', '')
+        lignes.append('BEGIN:VEVENT')
+        lignes.append(f"UID:cdp-agenda-{slug_classe}-{ev['id']}@cdp-scraper.local")
+        lignes.append(f"DTSTAMP:{horodatage}")
+        lignes.append(f"SUMMARY:{_echapper_ics(resume)}")
+        if description:
+            lignes.append(f"DESCRIPTION:{_echapper_ics(description)}")
+        if ev['journee_entiere']:
+            debut = ev['debut'].date()
+            fin = (ev['fin'].date() if ev['fin'] else debut) + timedelta(days=1)
+            lignes.append(f"DTSTART;VALUE=DATE:{debut:%Y%m%d}")
+            lignes.append(f"DTEND;VALUE=DATE:{fin:%Y%m%d}")
+        else:
+            fin = ev['fin']
+            if fin is None or fin == ev['debut']:
+                fin = ev['debut'] + timedelta(hours=DUREE_DEFAUT_HEURES)
+            lignes.append(f"DTSTART;TZID=Europe/Paris:{ev['debut']:%Y%m%dT%H%M%S}")
+            lignes.append(f"DTEND;TZID=Europe/Paris:{fin:%Y%m%dT%H%M%S}")
+        lignes.append('END:VEVENT')
+    lignes.append('END:VCALENDAR')
+    return '\r\n'.join(_plier_ligne(l) for l in lignes) + '\r\n'

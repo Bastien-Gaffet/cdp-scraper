@@ -210,5 +210,64 @@ class TestFiltrerDS(unittest.TestCase):
         self.assertEqual(cdp_agenda.filtrer_ds(evenements), [])
 
 
+class TestGenererICS(unittest.TestCase):
+    def _ev(self, **kw):
+        base = {"id": "1", "type": "Devoir surveillé", "matiere": "Mathématiques",
+                "debut": datetime(2026, 9, 12, 8, 0), "fin": datetime(2026, 9, 12, 8, 0),
+                "journee_entiere": False, "texte": "Texte simple."}
+        base.update(kw)
+        return base
+
+    def test_structure_de_base(self):
+        ics = cdp_agenda.generer_ics([self._ev()], "MPSI 1")
+        self.assertIn("BEGIN:VCALENDAR", ics)
+        self.assertIn("VERSION:2.0", ics)
+        self.assertIn("BEGIN:VEVENT", ics)
+        self.assertIn("SUMMARY:Devoir surveillé en Mathématiques", ics)
+        self.assertIn("END:VEVENT", ics)
+        self.assertIn("END:VCALENDAR", ics)
+
+    def test_summary_sans_matiere(self):
+        ics = cdp_agenda.generer_ics([self._ev(matiere="")], "MPSI 1")
+        self.assertIn("SUMMARY:Devoir surveillé", ics)
+        self.assertNotIn("SUMMARY:Devoir surveillé en", ics)
+
+    def test_uid_stable_et_deterministe(self):
+        ics1 = cdp_agenda.generer_ics([self._ev()], "MPSI 1")
+        ics2 = cdp_agenda.generer_ics([self._ev()], "MPSI 1")
+        uid1 = next(l for l in ics1.splitlines() if l.startswith("UID:"))
+        uid2 = next(l for l in ics2.splitlines() if l.startswith("UID:"))
+        self.assertEqual(uid1, uid2)
+        self.assertIn("cdp-agenda-mpsi-1-1@cdp-scraper.local", uid1)
+
+    def test_evenement_journee_entiere_dtend_jour_suivant(self):
+        ev = self._ev(journee_entiere=True, debut=datetime(2026, 9, 12, 0, 0), fin=None)
+        ics = cdp_agenda.generer_ics([ev], "MPSI 1")
+        self.assertIn("DTSTART;VALUE=DATE:20260912", ics)
+        self.assertIn("DTEND;VALUE=DATE:20260913", ics)
+
+    def test_duree_par_defaut_de_4h_si_une_seule_heure_connue(self):
+        ev = self._ev(fin=datetime(2026, 9, 12, 8, 0))  # fin == debut
+        ics = cdp_agenda.generer_ics([ev], "MPSI 1")
+        self.assertIn("DTSTART;TZID=Europe/Paris:20260912T080000", ics)
+        self.assertIn("DTEND;TZID=Europe/Paris:20260912T120000", ics)
+
+    def test_echappement_caracteres_speciaux(self):
+        ev = self._ev(texte="Ligne 1\nAvec virgule, point-virgule; et \\ backslash.")
+        ics = cdp_agenda.generer_ics([ev], "MPSI 1")
+        self.assertIn(
+            "DESCRIPTION:Ligne 1\\nAvec virgule\\, point-virgule\\; et \\\\ backslash.",
+            ics)
+
+    def test_pliage_ligne_longue(self):
+        ev = self._ev(texte="x" * 200)
+        ics = cdp_agenda.generer_ics([ev], "MPSI 1")
+        lignes = ics.split("\r\n")
+        self.assertGreater(sum(1 for l in lignes if l.startswith("DESCRIPTION:")
+                               or l.startswith(" ")), 1)
+        for l in lignes:
+            self.assertLessEqual(len(l.encode("utf-8")), 75)
+
+
 if __name__ == "__main__":
     unittest.main()
