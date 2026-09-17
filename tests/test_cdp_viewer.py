@@ -7,6 +7,7 @@ import subprocess
 import threading
 import urllib.request
 import urllib.error
+from datetime import datetime
 from unittest import mock
 
 # Les tests vivent dans tests/ ; on ajoute la racine du projet au sys.path pour
@@ -430,7 +431,7 @@ class TestVersionCLI(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0)
         # argparse action="version" écrit sur stdout (3.4+) ; on couvre les deux flux.
-        self.assertIn("cdp-viewer 1.6.0", res.stdout + res.stderr)
+        self.assertIn("cdp-viewer 1.7.0", res.stdout + res.stderr)
 
 
 class TestPageErreur(unittest.TestCase):
@@ -466,6 +467,73 @@ class TestNavigationClavier(unittest.TestCase):
         self.assertIn("function classeSuivante", p)
         self.assertIn("scrollIntoView", p)
         self.assertIn(".ligne.actif", p)
+
+
+class TestCalendrier(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.racine = Path(cls.tmp.name)
+        pcsi = cls.racine / "PCSI"
+        pcsi.mkdir(parents=True)
+        (cls.racine / "TSI").mkdir()  # classe sans agenda
+        ev = {"id": "1", "type": "Devoir surveillé", "matiere": "Mathématiques",
+              "debut": datetime(2026, 9, 12, 8, 0), "fin": datetime(2026, 9, 12, 8, 0),
+              "journee_entiere": False, "texte": "Texte du DS."}
+        contenu = cdp_viewer.cdp_agenda.generer_ics([ev], "PCSI")
+        (pcsi / ".agenda.ics").write_text(contenu, encoding="utf-8")
+
+        cls.serveur = cdp_viewer.creer_serveur(cls.racine, port=0)
+        cls.port = cls.serveur.server_address[1]
+        cls.thread = threading.Thread(target=cls.serveur.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.serveur.shutdown()
+        cls.serveur.server_close()
+        cls.tmp.cleanup()
+
+    def _get(self, chemin):
+        return urllib.request.urlopen(f"http://127.0.0.1:{self.port}{chemin}", timeout=5)
+
+    def test_page_liste_les_evenements(self):
+        with self._get("/calendrier/PCSI") as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers["Content-Type"], "text/html; charset=utf-8")
+            page = r.read().decode("utf-8")
+        self.assertIn("Devoir surveillé en Mathématiques", page)
+        self.assertIn("/calendrier/PCSI/telecharger", page)
+
+    def test_telecharger_sert_le_fichier_brut(self):
+        with self._get("/calendrier/PCSI/telecharger") as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers["Content-Type"], "text/calendar; charset=utf-8")
+            self.assertIn('attachment; filename="agenda-PCSI.ics"',
+                          r.headers["Content-Disposition"])
+            contenu = r.read().decode("utf-8")
+        self.assertIn("BEGIN:VCALENDAR", contenu)
+
+    def test_absent_page_informative_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/calendrier/TSI")
+        self.assertEqual(ctx.exception.code, 404)
+        self.assertIn("Agenda indisponible", ctx.exception.read().decode("utf-8"))
+
+    def test_classe_inconnue_404(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/calendrier/TERM")
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_agenda_ics_absent_de_api_tree(self):
+        with self._get("/api/tree?classe=PCSI") as r:
+            arbre = json.load(r)
+        self.assertEqual(arbre.get("enfants", []), [])
+
+    def test_agenda_ics_absent_de_api_classes(self):
+        with self._get("/api/classes") as r:
+            classes = json.load(r)
+        self.assertEqual(sorted(classes), ["PCSI", "TSI"])
 
 
 class TestVerifMajViewer(unittest.TestCase):

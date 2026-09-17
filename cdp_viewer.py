@@ -27,8 +27,9 @@ import cdp_manifeste
 import cdp_coloration
 import cdp_markdown
 import cdp_maj
+import cdp_agenda
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
 DEPOT_SLUG = "Bastien-Gaffet/cdp-scraper"
 
@@ -725,6 +726,9 @@ MESSAGES_ERREUR = {
               "Ce chemin sort du dossier des cours autorisé."),
     "introuvable": ("Page introuvable",
                     "Cette adresse ne correspond à aucune page du viewer."),
+    "agenda": ("Agenda indisponible",
+               "Aucun agenda n'a été récupéré pour cette classe. Lancez "
+               "cdp_scraper.py sans --sans-agenda pour le récupérer."),
 }
 
 
@@ -735,6 +739,81 @@ def page_erreur(code: int, contexte: str) -> bytes:
             .replace("__CODE__", str(code))
             .replace("__TITRE__", html.escape(titre))
             .replace("__MESSAGE__", html.escape(message)))
+    return page.encode("utf-8")
+
+
+PAGE_CALENDRIER = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendrier — __CLASSE__</title>
+<style>
+:root { --bg:#f7f7f8; --panel:#fff; --txt:#1d1d1f; --muted:#6b6b70; --border:#e3e3e6; --accent:#2563eb; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg:#1d1d1f; --panel:#232326; --txt:#f2f2f3; --muted:#9a9a9e; --border:#3a3a3d; --accent:#5b8def; }
+}
+:root[data-theme="dark"] { --bg:#1d1d1f; --panel:#232326; --txt:#f2f2f3; --muted:#9a9a9e; --border:#3a3a3d; --accent:#5b8def; }
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 system-ui,sans-serif;color:var(--txt);background:var(--bg)}
+header{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--border);
+  padding:10px 14px;display:flex;align-items:center;gap:12px}
+header .titre{font-weight:600;flex:1}
+a.bouton{font:inherit;color:var(--txt);background:var(--bg);text-decoration:none;
+  border:1px solid var(--border);border-radius:8px;padding:6px 10px}
+a.bouton:hover{border-color:var(--accent)}
+main{max-width:40rem;margin:0 auto;padding:16px}
+article{border-bottom:1px solid var(--border);padding:10px 0}
+article h3{margin:0 0 2px;font-size:14px}
+article p{margin:2px 0 0;color:var(--muted)}
+.vide{color:var(--muted);padding:24px 0}
+</style>
+</head>
+<body>
+<header>
+  <span class="titre">Calendrier — __CLASSE__</span>
+  <a class="bouton" href="__TELECHARGER__">Télécharger le .ics</a>
+  <a class="bouton" href="/">Retour</a>
+</header>
+<main>
+__EVENEMENTS__
+</main>
+<script>
+if (localStorage.getItem("cdp-theme") === "dark")
+  document.documentElement.setAttribute("data-theme", "dark");
+</script>
+</body>
+</html>"""
+
+_JOURS_FR = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+_MOIS_FR = ["", "janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+            "août", "septembre", "octobre", "novembre", "décembre"]
+
+
+def _formater_date_fr(dt: datetime, avec_heure: bool) -> str:
+    texte = f"{_JOURS_FR[dt.weekday()]} {dt.day} {_MOIS_FR[dt.month]} {dt.year}"
+    if avec_heure:
+        texte += f" à {dt.hour}h" + (f"{dt.minute:02d}" if dt.minute else "")
+    return texte
+
+
+def page_calendrier(classe: str, evenements: list) -> bytes:
+    if evenements:
+        blocs = []
+        for ev in sorted(evenements, key=lambda e: e["debut"]):
+            date_txt = _formater_date_fr(ev["debut"], avec_heure=not ev["journee_entiere"])
+            blocs.append(
+                f'<article><h3>{html.escape(date_txt)}</h3>'
+                f'<p>{html.escape(ev["resume"])}</p></article>'
+            )
+        corps = "\n".join(blocs)
+    else:
+        corps = '<div class="vide">Aucun devoir surveillé trouvé pour cette classe.</div>'
+    enc = urllib.parse.quote(classe)
+    page = (PAGE_CALENDRIER
+            .replace("__CLASSE__", html.escape(classe))
+            .replace("__TELECHARGER__", f"/calendrier/{enc}/telecharger")
+            .replace("__EVENEMENTS__", corps))
     return page.encode("utf-8")
 
 
@@ -1046,7 +1125,7 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
     """Sert la page, l'API JSON et les fichiers. `self.server.racine` = racine."""
 
     def _envoyer_octets(self, code: int, octets: bytes, content_type: str,
-                        cache: bool = True):
+                        cache: bool = True, entetes: dict = None):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(octets)))
@@ -1054,6 +1133,8 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             # Évite qu'un navigateur garde une ancienne version de la page/API
             # après une mise à jour du viewer (cause de comportements « périmés »).
             self.send_header("Cache-Control", "no-store")
+        for nom, valeur in (entetes or {}).items():
+            self.send_header(nom, valeur)
         self.end_headers()
         self.wfile.write(octets)
 
@@ -1087,6 +1168,30 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
                 self._erreur(404, "classe")
                 return
             self._envoyer_json(200, arbre)
+            return
+
+        if chemin.startswith("/calendrier/"):
+            rel = urllib.parse.unquote(chemin[len("/calendrier/"):])
+            telechargement = rel.endswith("/telecharger")
+            classe = rel[:-len("/telecharger")] if telechargement else rel
+            base = resoudre_dans_racine(racine, classe)
+            if base is None or not base.is_dir():
+                self._erreur(404, "classe")
+                return
+            cible = base / ".agenda.ics"
+            if not cible.is_file():
+                self._erreur(404, "agenda")
+                return
+            contenu = cible.read_text(encoding="utf-8")
+            if telechargement:
+                entetes = {"Content-Disposition": f'attachment; filename="agenda-{classe}.ics"'}
+                self._envoyer_octets(200, contenu.encode("utf-8"),
+                                     "text/calendar; charset=utf-8", cache=False,
+                                     entetes=entetes)
+                return
+            evenements = cdp_agenda.lire_ics(contenu)
+            self._envoyer_octets(200, page_calendrier(classe, evenements),
+                                 "text/html; charset=utf-8", cache=False)
             return
 
         if chemin.startswith("/ouvrir/"):                 # .ggb -> GeoGebra en ligne
