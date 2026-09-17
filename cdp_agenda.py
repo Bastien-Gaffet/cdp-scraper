@@ -9,6 +9,7 @@ cdp_viewer.py (lecture pour affichage) : `requests` n'est donc jamais importé
 au niveau module ici, seulement en local dans recuperer_agenda (seule
 fonction qui en a besoin) — le viewer doit rester sans dépendance externe.
 """
+import html as _html_mod
 import re
 from datetime import date, datetime, time
 
@@ -72,3 +73,57 @@ def parser_date_agenda(texte: str):
     debut = datetime.combine(d1, h1a or time(0, 0))
     fin = datetime.combine(d2, h2b or h2a or time(0, 0))
     return debut, fin, False
+
+
+RE_ARTICLE = re.compile(r'<article\s+data-id="(\d+)"[^>]*>(.*?)</article>', re.DOTALL)
+RE_H3 = re.compile(r'<h3 class="titreagenda">(.*?)</h3>', re.DOTALL)
+RE_H4 = re.compile(r'<h4>(.*?)</h4>', re.DOTALL)
+RE_P = re.compile(r'<p>(.*?)</p>', re.DOTALL)
+RE_GRID = re.compile(r'<td data-id="(\d+)"><p class="evnmt\d+[^"]*">(.*?)</p></td>', re.DOTALL)
+RE_HEURE_PREFIXE = re.compile(r'^\d{1,2}h\d{0,2}\s*:\s*')
+
+
+def _texte(s: str) -> str:
+    return _html_mod.unescape(re.sub(r"<[^>]+>", "", s)).strip()
+
+
+def _type_matiere(titre_grille, titre_h4):
+    """Sépare type et matière. La grille utilise " - " (fiable) ; à défaut,
+    repli sur le " en " du bloc détaillé (ambigu si la matière contient
+    elle-même ce mot, mais suffisant en dernier recours)."""
+    if titre_grille:
+        texte = RE_HEURE_PREFIXE.sub('', titre_grille).strip()
+        if ' - ' in texte:
+            matiere, type_ = texte.split(' - ', 1)
+            return type_.strip(), matiere.strip()
+        return texte, ''
+    if ' en ' in titre_h4:
+        type_, matiere = titre_h4.rsplit(' en ', 1)
+        return type_.strip(), matiere.strip()
+    return titre_h4, ''
+
+
+def analyser_page_agenda(html_page: str) -> list:
+    """Analyse une page mensuelle de l'agenda (compte en lecture seule —
+    cas normal pour un élève). Un bloc en mode édition (droits d'édition sur
+    l'agenda) n'a pas de <h3>/<h4> et est silencieusement ignoré, de même
+    qu'un texte de date non reconnu : jamais d'exception."""
+    titres_grille = {i: _texte(t) for i, t in RE_GRID.findall(html_page)}
+    evenements = []
+    for id_, corps in RE_ARTICLE.findall(html_page):
+        h3 = RE_H3.search(corps)
+        h4 = RE_H4.search(corps)
+        if not h3 or not h4:
+            continue
+        try:
+            debut, fin, journee_entiere = parser_date_agenda(_texte(h3.group(1)))
+        except ValueError:
+            continue
+        type_, matiere = _type_matiere(titres_grille.get(id_), _texte(h4.group(1)))
+        p = RE_P.search(corps)
+        evenements.append({
+            "id": id_, "type": type_, "matiere": matiere,
+            "debut": debut, "fin": fin, "journee_entiere": journee_entiere,
+            "texte": _texte(p.group(1)) if p else "",
+        })
+    return evenements
