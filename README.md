@@ -51,6 +51,10 @@ Au **premier lancement**, ces conditions s'affichent et vous devez les accepter
   `--no-verif-maj` (viewer).
 - Les fichiers téléchargés et les éventuels cookies de session restent **chez
   vous** ; le `.gitignore` fourni évite de les versionner par accident.
+- L'agenda de la classe (devoirs surveillés) est lu avec votre compte, comme
+  les autres documents, et exporté **localement** en `.ics` (`.agenda.ics`
+  dans le dossier de la classe). Aucune donnée n'est envoyée à un tiers ;
+  désactivable avec `--sans-agenda`.
 
 ---
 
@@ -126,6 +130,7 @@ Principaux arguments :
 | `--coffre-lister` | Afficher les classes ayant un mot de passe dans le coffre. |
 | `--coffre-changer-mdp` | Changer le mot de passe maître du coffre. |
 | `--sans-verif-maj` | Ne pas vérifier si une nouvelle version est disponible. |
+| `--sans-agenda` | Ne pas récupérer les devoirs surveillés de l'agenda (export `.ics`). |
 
 ### 🔄 Synchronisation intelligente
 
@@ -146,6 +151,24 @@ python cdp_scraper.py --url https://cahier-de-prepa.fr/ma-classe -s ./cours --re
 
 Dans le visualiseur, chaque fichier affiche sa **date d'ajout** et une vue
 **« Récemment ajoutés »** regroupe les documents récents (7 / 30 / 90 jours).
+
+### 📅 Agenda → Google Calendar
+
+À chaque synchronisation, les **devoirs surveillés (DS)** programmés dans
+l'agenda de la classe (toute l'année scolaire, de septembre à juin) sont
+exportés dans `<dossier>/<classe>/.agenda.ics`, prêt à importer dans Google
+Calendar (*Paramètres → Importer et exporter → Importer*). Le visualiseur
+propose aussi une page **Calendrier** (bouton dans l'en-tête) pour consulter
+la liste et retélécharger le fichier.
+
+- Désactivable avec `--sans-agenda`.
+- Le filtre repère les événements dont le type contient « surveillé » —
+  couvre le nom par défaut du logiciel (« Devoir surveillé ») mais pas un
+  intitulé très différent choisi par un professeur.
+- **Réimporter dans Google Calendar après une nouvelle synchronisation
+  recrée les événements déjà présents** (Google ne déduplique pas un import
+  manuel par UID). Conseil : importez dans un **calendrier secondaire dédié**
+  et videz-le avant de réimporter une version à jour.
 
 ### ⚙️ Config mémorisée et multi-classes
 
@@ -239,6 +262,9 @@ naviguez dans l'arbre à gauche, l'aperçu s'affiche à droite.
   installée** sur le PC, puis à défaut sur l'**explorateur de fichiers**.
 - Les autres fichiers non affichables par le navigateur (ex. `.docx`) suivent la
   même logique appli installée → explorateur (jamais de téléchargement silencieux).
+- Un bouton **« Calendrier »** dans l'en-tête affiche les devoirs surveillés
+  de la classe sélectionnée et permet de retélécharger le `.ics` généré par
+  le scraper (voir [📅 Agenda → Google Calendar](#-agenda--google-calendar)).
 
 ---
 
