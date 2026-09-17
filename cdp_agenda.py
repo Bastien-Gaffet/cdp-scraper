@@ -243,3 +243,44 @@ def generer_ics(evenements: list, nom_classe: str) -> str:
         lignes.append('END:VEVENT')
     lignes.append('END:VCALENDAR')
     return '\r\n'.join(_plier_ligne(l) for l in lignes) + '\r\n'
+
+
+def _deplier_ics(valeur: str) -> str:
+    return (valeur.replace('\\n', '\n').replace('\\,', ',')
+                  .replace('\\;', ';').replace('\\\\', '\\'))
+
+
+def _evenement_depuis_champs(champs: dict) -> dict:
+    cle_debut, val_debut = champs['DTSTART']
+    journee_entiere = 'VALUE=DATE' in cle_debut
+    cle_fin, val_fin = champs.get('DTEND', (None, None))
+    if journee_entiere:
+        debut = datetime.strptime(val_debut, '%Y%m%d')
+        fin = (datetime.strptime(val_fin, '%Y%m%d') - timedelta(days=1)) if val_fin else debut
+    else:
+        debut = datetime.strptime(val_debut, '%Y%m%dT%H%M%S')
+        fin = datetime.strptime(val_fin, '%Y%m%dT%H%M%S') if val_fin else None
+    return {
+        "resume": _deplier_ics(champs.get('SUMMARY', (None, ''))[1]),
+        "description": _deplier_ics(champs.get('DESCRIPTION', (None, ''))[1]),
+        "debut": debut, "fin": fin, "journee_entiere": journee_entiere,
+    }
+
+
+def lire_ics(contenu: str) -> list:
+    """Relit un .ics généré par generer_ics (round-trip : ce n'est pas un
+    parseur RFC 5545 généraliste, seulement le format qu'on produit soi-même),
+    pour l'affichage dans le viewer."""
+    texte = contenu.replace('\r\n ', '').replace('\r\n', '\n')
+    evenements = []
+    champs = {}
+    for ligne in texte.split('\n'):
+        if ligne == 'BEGIN:VEVENT':
+            champs = {}
+        elif ligne == 'END:VEVENT':
+            evenements.append(_evenement_depuis_champs(champs))
+        elif ':' in ligne:
+            cle, _, valeur = ligne.partition(':')
+            nom = cle.split(';')[0]
+            champs[nom] = (cle, valeur)
+    return evenements

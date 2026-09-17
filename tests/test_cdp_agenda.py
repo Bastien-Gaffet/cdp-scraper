@@ -269,5 +269,38 @@ class TestGenererICS(unittest.TestCase):
             self.assertLessEqual(len(l.encode("utf-8")), 75)
 
 
+class TestLireICS(unittest.TestCase):
+    def test_round_trip_evenement_horodate(self):
+        ev = {"id": "1", "type": "Devoir surveillé", "matiere": "Mathématiques",
+              "debut": datetime(2026, 9, 12, 8, 0), "fin": datetime(2026, 9, 12, 12, 0),
+              "journee_entiere": False, "texte": "Texte, avec virgule."}
+        relus = cdp_agenda.lire_ics(cdp_agenda.generer_ics([ev], "MPSI 1"))
+        self.assertEqual(len(relus), 1)
+        self.assertEqual(relus[0]["resume"], "Devoir surveillé en Mathématiques")
+        self.assertEqual(relus[0]["debut"], datetime(2026, 9, 12, 8, 0))
+        self.assertEqual(relus[0]["fin"], datetime(2026, 9, 12, 12, 0))
+        self.assertFalse(relus[0]["journee_entiere"])
+        self.assertEqual(relus[0]["description"], "Texte, avec virgule.")
+
+    def test_round_trip_journee_entiere(self):
+        ev = {"id": "2", "type": "Vacances", "matiere": "",
+              "debut": datetime(2026, 12, 19, 0, 0), "fin": datetime(2027, 1, 4, 0, 0),
+              "journee_entiere": True, "texte": ""}
+        relus = cdp_agenda.lire_ics(cdp_agenda.generer_ics([ev], "MPSI 1"))
+        self.assertTrue(relus[0]["journee_entiere"])
+        self.assertEqual(relus[0]["debut"], datetime(2026, 12, 19, 0, 0))
+        self.assertEqual(relus[0]["fin"], datetime(2027, 1, 4, 0, 0))
+
+    def test_texte_long_replie_se_relit_correctement(self):
+        ev = {"id": "3", "type": "Devoir surveillé", "matiere": "",
+              "debut": datetime(2026, 9, 12, 8, 0), "fin": datetime(2026, 9, 12, 12, 0),
+              "journee_entiere": False, "texte": "x" * 200}
+        relus = cdp_agenda.lire_ics(cdp_agenda.generer_ics([ev], "MPSI 1"))
+        self.assertEqual(relus[0]["description"], "x" * 200)
+
+    def test_aucun_evenement(self):
+        self.assertEqual(cdp_agenda.lire_ics(cdp_agenda.generer_ics([], "MPSI 1")), [])
+
+
 if __name__ == "__main__":
     unittest.main()
