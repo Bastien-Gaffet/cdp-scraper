@@ -18,11 +18,17 @@ La version est unique pour l'ensemble du projet : `cdp_scraper.py` et
   génération/lecture `.ics` à la main — zéro dépendance ajoutée).
 - Viewer : nouvelle page **Calendrier** (`/calendrier/<classe>`) listant les
   DS trouvés, avec téléchargement du `.ics` (`/calendrier/<classe>/telecharger`).
-  Bouton dédié dans l'en-tête de la page d'accueil.
+  Bouton dédié dans l'en-tête de la page d'accueil. Vue mensuelle en plus de
+  la liste (grille calendaire avec navigation mois précédent/suivant).
 
 ### Modifié
 - La section RGPD du README mentionne la lecture de l'agenda (locale,
   aucune donnée envoyée à un tiers).
+
+### Corrigé
+- La page Calendrier suit désormais le thème choisi dans le viewer
+  (`localStorage`), comme le reste de l'application, au lieu de toujours
+  suivre la préférence sombre/claire du système.
 
 ## [1.6.0] - 2026-09-06
 
