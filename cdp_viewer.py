@@ -755,15 +755,16 @@ PAGE_CALENDRIER = r"""<!doctype html>
 <title>Calendrier — __CLASSE__</title>
 <style>
 :root { --bg:#f7f7f8; --panel:#fff; --txt:#1d1d1f; --muted:#6b6b70; --border:#e3e3e6; --accent:#2563eb; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg:#1d1d1f; --panel:#232326; --txt:#f2f2f3; --muted:#9a9a9e; --border:#3a3a3d; --accent:#5b8def; }
-}
-:root[data-theme="dark"] { --bg:#1d1d1f; --panel:#232326; --txt:#f2f2f3; --muted:#9a9a9e; --border:#3a3a3d; --accent:#5b8def; }
+[data-theme="dark"] { --bg:#1d1d1f; --panel:#232326; --txt:#f2f2f3; --muted:#9a9a9e; --border:#3a3a3d; --accent:#5b8def; }
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.5 system-ui,sans-serif;color:var(--txt);background:var(--bg)}
 header{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--border);
-  padding:10px 14px;display:flex;align-items:center;gap:12px}
+  padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header .titre{font-weight:600;flex:1}
+.bascule{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.bascule button{font:inherit;border:none;background:var(--bg);color:var(--txt);
+  padding:6px 10px;cursor:pointer}
+.bascule button.actif{background:var(--accent);color:#fff}
 a.bouton{font:inherit;color:var(--txt);background:var(--bg);text-decoration:none;
   border:1px solid var(--border);border-radius:8px;padding:6px 10px}
 a.bouton:hover{border-color:var(--accent)}
@@ -772,20 +773,123 @@ article{border-bottom:1px solid var(--border);padding:10px 0}
 article h3{margin:0 0 2px;font-size:14px}
 article p{margin:2px 0 0;color:var(--muted)}
 .vide{color:var(--muted);padding:24px 0}
+#mois-entete{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:10px}
+#mois-entete button{font:inherit;border:1px solid var(--border);background:var(--bg);
+  color:var(--txt);border-radius:8px;padding:4px 10px;cursor:pointer}
+#mois-entete button:hover{border-color:var(--accent)}
+#mois-titre{font-weight:600;min-width:11em;text-align:center}
+#grille-mois{width:100%;border-collapse:collapse;table-layout:fixed}
+#grille-mois th{font-weight:600;font-size:12px;color:var(--muted);padding:4px;text-align:center}
+#grille-mois td{border:1px solid var(--border);vertical-align:top;height:5em;padding:2px;
+  font-size:12px;overflow:hidden}
+#grille-mois .jour{color:var(--muted)}
+#grille-mois p.evnmt{margin:2px 0 0;padding:1px 4px;background:var(--accent);color:#fff;
+  border-radius:4px;font-size:11px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
 </style>
 </head>
 <body>
 <header>
   <span class="titre">Calendrier — __CLASSE__</span>
+  <div class="bascule">
+    <button id="vue-liste" class="actif">Liste</button>
+    <button id="vue-mois">Mois</button>
+  </div>
   <a class="bouton" href="__TELECHARGER__">Télécharger le .ics</a>
   <a class="bouton" href="/">Retour</a>
 </header>
 <main>
+<section id="liste">
 __EVENEMENTS__
+</section>
+<section id="mois" hidden>
+  <div id="mois-entete">
+    <button id="mois-prec" title="Mois précédent">&laquo;</button>
+    <span id="mois-titre"></span>
+    <button id="mois-suiv" title="Mois suivant">&raquo;</button>
+  </div>
+  <table id="grille-mois">
+    <thead><tr><th>Lun</th><th>Mar</th><th>Mer</th><th>Jeu</th><th>Ven</th><th>Sam</th><th>Dim</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
 </main>
 <script>
 if (localStorage.getItem("cdp-theme") === "dark")
   document.documentElement.setAttribute("data-theme", "dark");
+
+const EVENEMENTS = __EVENEMENTS_JSON__;
+
+function cleJour(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")
+       + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+const parJour = {};
+EVENEMENTS.forEach(ev => {
+  const debut = new Date(ev.debut);
+  const fin = ev.fin ? new Date(ev.fin) : debut;
+  let d = new Date(debut.getFullYear(), debut.getMonth(), debut.getDate());
+  const dFin = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate());
+  while (d <= dFin) {
+    const cle = cleJour(d);
+    (parJour[cle] = parJour[cle] || []).push(ev.resume);
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  }
+});
+
+const NOMS_MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+                   "août", "septembre", "octobre", "novembre", "décembre"];
+let moisCourant = EVENEMENTS.length ? new Date(EVENEMENTS[0].debut) : new Date();
+moisCourant = new Date(moisCourant.getFullYear(), moisCourant.getMonth(), 1);
+
+function rendreMois() {
+  document.getElementById("mois-titre").textContent =
+    NOMS_MOIS[moisCourant.getMonth()] + " " + moisCourant.getFullYear();
+  const premier = new Date(moisCourant.getFullYear(), moisCourant.getMonth(), 1);
+  const decalage = (premier.getDay() + 6) % 7;   // 0 = lundi
+  const nbJours = new Date(moisCourant.getFullYear(), moisCourant.getMonth() + 1, 0).getDate();
+  const corps = document.querySelector("#grille-mois tbody");
+  corps.innerHTML = "";
+  let ligne = document.createElement("tr");
+  for (let i = 0; i < decalage; i++) ligne.appendChild(document.createElement("td"));
+  for (let jour = 1; jour <= nbJours; jour++) {
+    if (ligne.children.length === 7) { corps.appendChild(ligne); ligne = document.createElement("tr"); }
+    const cle = cleJour(new Date(moisCourant.getFullYear(), moisCourant.getMonth(), jour));
+    const td = document.createElement("td");
+    const numero = document.createElement("span");
+    numero.className = "jour"; numero.textContent = jour;
+    td.appendChild(numero);
+    (parJour[cle] || []).forEach(resume => {
+      const p = document.createElement("p");
+      p.className = "evnmt"; p.textContent = resume; p.title = resume;
+      td.appendChild(p);
+    });
+    ligne.appendChild(td);
+  }
+  while (ligne.children.length < 7) ligne.appendChild(document.createElement("td"));
+  corps.appendChild(ligne);
+}
+
+document.getElementById("mois-prec").onclick = () => {
+  moisCourant = new Date(moisCourant.getFullYear(), moisCourant.getMonth() - 1, 1);
+  rendreMois();
+};
+document.getElementById("mois-suiv").onclick = () => {
+  moisCourant = new Date(moisCourant.getFullYear(), moisCourant.getMonth() + 1, 1);
+  rendreMois();
+};
+
+function basculerVue(vue) {
+  document.getElementById("liste").hidden = vue !== "liste";
+  document.getElementById("mois").hidden = vue !== "mois";
+  document.getElementById("vue-liste").classList.toggle("actif", vue === "liste");
+  document.getElementById("vue-mois").classList.toggle("actif", vue === "mois");
+}
+document.getElementById("vue-liste").onclick = () => basculerVue("liste");
+document.getElementById("vue-mois").onclick = () => basculerVue("mois");
+
+rendreMois();
 </script>
 </body>
 </html>"""
@@ -814,11 +918,17 @@ def page_calendrier(classe: str, evenements: list) -> bytes:
         corps = "\n".join(blocs)
     else:
         corps = '<div class="vide">Aucun devoir surveillé trouvé pour cette classe.</div>'
+    donnees_js = json.dumps([
+        {"resume": ev["resume"], "debut": ev["debut"].isoformat(),
+         "fin": ev["fin"].isoformat() if ev["fin"] else None}
+        for ev in evenements
+    ])
     enc = urllib.parse.quote(classe)
     page = (PAGE_CALENDRIER
             .replace("__CLASSE__", html.escape(classe))
             .replace("__TELECHARGER__", f"/calendrier/{enc}/telecharger")
-            .replace("__EVENEMENTS__", corps))
+            .replace("__EVENEMENTS__", corps)
+            .replace("__EVENEMENTS_JSON__", donnees_js))
     return page.encode("utf-8")
 
 

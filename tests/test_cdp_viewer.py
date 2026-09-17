@@ -504,6 +504,12 @@ class TestCalendrier(unittest.TestCase):
             page = r.read().decode("utf-8")
         self.assertIn("Devoir surveillé en Mathématiques", page)
         self.assertIn("/calendrier/PCSI/telecharger", page)
+        # Vue mensuelle : les événements sont aussi embarqués en JSON pour le
+        # rendu de la grille côté client, et l'attribut data-theme n'est posé
+        # que par le script (jamais forcé par @media prefers-color-scheme).
+        self.assertIn('id="grille-mois"', page)
+        self.assertIn('"resume": "Devoir surveill\\u00e9 en Math\\u00e9matiques"', page)
+        self.assertNotIn("@media (prefers-color-scheme", page)
 
     def test_telecharger_sert_le_fichier_brut(self):
         with self._get("/calendrier/PCSI/telecharger") as r:
