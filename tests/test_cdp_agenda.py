@@ -193,5 +193,22 @@ class TestRecupererAgenda(unittest.TestCase):
         self.assertEqual(evenements[0]["id"], "2")
 
 
+class TestFiltrerDS(unittest.TestCase):
+    def _ev(self, type_):
+        return {"id": "1", "type": type_, "matiere": "", "debut": datetime(2026, 9, 1),
+                "fin": None, "journee_entiere": True, "texte": ""}
+
+    def test_garde_devoir_surveille(self):
+        self.assertEqual(len(cdp_agenda.filtrer_ds([self._ev("Devoir surveillé")])), 1)
+
+    def test_insensible_casse_et_accents(self):
+        evenements = [self._ev("DEVOIR SURVEILLE"), self._ev("devoir survéillé")]
+        self.assertEqual(len(cdp_agenda.filtrer_ds(evenements)), 2)
+
+    def test_ecarte_les_autres_types(self):
+        evenements = [self._ev("Devoir maison"), self._ev("Cours"), self._ev("Vacances")]
+        self.assertEqual(cdp_agenda.filtrer_ds(evenements), [])
+
+
 if __name__ == "__main__":
     unittest.main()

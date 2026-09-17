@@ -157,3 +157,18 @@ def recuperer_agenda(session, base: str, aujourdhui=None, delai: float = 0.0) ->
         if delai:
             sleep(delai)
     return list(fusion.values())
+
+
+import unicodedata
+
+
+def _normaliser(s: str) -> str:
+    s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+    return s.lower()
+
+
+def filtrer_ds(evenements: list) -> list:
+    """Garde les événements dont le type normalisé (minuscules, sans accents)
+    contient 'surveille' — couvre le nom par défaut "Devoir surveillé" sans
+    exiger une correspondance exacte."""
+    return [e for e in evenements if 'surveille' in _normaliser(e['type'])]
