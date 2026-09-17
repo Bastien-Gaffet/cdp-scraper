@@ -127,3 +127,33 @@ def analyser_page_agenda(html_page: str) -> list:
             "texte": _texte(p.group(1)) if p else "",
         })
     return evenements
+
+
+from time import sleep
+
+
+def recuperer_agenda(session, base: str, aujourdhui=None, delai: float = 0.0) -> list:
+    """Parcourt agenda?mois=YYMM pour chaque mois de l'année scolaire
+    contenant `aujourdhui` (aujourd'hui par défaut), fusionne les événements
+    par identifiant (un même événement vu sur deux mois voisins n'apparaît
+    qu'une fois). Un mois en échec réseau est simplement ignoré — jamais
+    d'exception qui remonte.
+
+    `requests` est importé ici (et non au niveau module) : cdp_viewer.py
+    importe aussi cdp_agenda pour lire les .ics déjà générés, et doit rester
+    sans dépendance externe ; seule cette fonction (jamais appelée par le
+    viewer) a besoin de requests."""
+    import requests
+    aujourdhui = aujourdhui or date.today()
+    fusion = {}
+    for annee, mois in mois_annee_scolaire(aujourdhui):
+        url = f"{base}/agenda?mois={annee % 100:02d}{mois:02d}"
+        try:
+            page = session.get(url, timeout=20).text
+        except requests.RequestException:
+            continue
+        for ev in analyser_page_agenda(page):
+            fusion[ev["id"]] = ev
+        if delai:
+            sleep(delai)
+    return list(fusion.values())

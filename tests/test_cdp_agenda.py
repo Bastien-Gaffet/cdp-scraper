@@ -143,5 +143,55 @@ class TestAnalyserPageAgenda(unittest.TestCase):
         self.assertEqual(cdp_agenda.analyser_page_agenda(page), [])
 
 
+import requests
+
+
+class _FakeRespAgenda:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeSessionAgenda:
+    """Session hors-ligne : renvoie une page figée par URL ; enregistre les
+    appels ; peut simuler un échec réseau sur certaines URLs."""
+
+    def __init__(self, pages, echecs=()):
+        self.pages = pages
+        self.echecs = set(echecs)
+        self.appels = []
+
+    def get(self, url, timeout=None):
+        self.appels.append(url)
+        if url in self.echecs:
+            raise requests.RequestException("boom")
+        return _FakeRespAgenda(self.pages.get(url, ""))
+
+
+class TestRecupererAgenda(unittest.TestCase):
+    BASE = "https://x/mpsi"
+
+    def _url(self, annee, mois):
+        return f"{self.BASE}/agenda?mois={annee % 100:02d}{mois:02d}"
+
+    def test_fusionne_les_mois_sans_doublon_et_interroge_10_mois(self):
+        aujourdhui = date(2026, 9, 15)
+        pages = {
+            self._url(2026, 9): _bloc("1", "Le vendredi 4 septembre 2026", "Devoir surveillé"),
+            self._url(2026, 10): _bloc("1", "Le vendredi 4 septembre 2026", "Devoir surveillé"),
+        }
+        session = _FakeSessionAgenda(pages)
+        evenements = cdp_agenda.recuperer_agenda(session, self.BASE, aujourdhui=aujourdhui)
+        self.assertEqual(len(evenements), 1)
+        self.assertEqual(len(session.appels), 10)
+
+    def test_echec_reseau_sur_un_mois_n_arrete_pas_les_autres(self):
+        aujourdhui = date(2026, 9, 15)
+        pages = {self._url(2026, 10): _bloc("2", "Le lundi 5 octobre 2026", "Devoir surveillé")}
+        session = _FakeSessionAgenda(pages, echecs=[self._url(2026, 9)])
+        evenements = cdp_agenda.recuperer_agenda(session, self.BASE, aujourdhui=aujourdhui)
+        self.assertEqual(len(evenements), 1)
+        self.assertEqual(evenements[0]["id"], "2")
+
+
 if __name__ == "__main__":
     unittest.main()
