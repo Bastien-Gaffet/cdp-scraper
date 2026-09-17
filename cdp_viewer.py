@@ -26,8 +26,16 @@ from pathlib import Path
 import cdp_manifeste
 import cdp_coloration
 import cdp_markdown
+import cdp_maj
+import cdp_agenda
 
-__version__ = "1.5.0"
+__version__ = "1.7.0"
+DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
+DEPOT_SLUG = "Bastien-Gaffet/cdp-scraper"
+
+
+def _tty() -> bool:
+    return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 PAGE_HTML = r"""<!doctype html>
 <html lang="fr">
@@ -55,6 +63,9 @@ select, input, button { font:inherit; color:var(--txt); background:var(--bg);
   border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
 button { cursor:pointer; }
 a { color:inherit; text-decoration:none; }
+a.bouton { display:inline-block; font:inherit; color:var(--txt); background:var(--bg);
+  border:1px solid var(--border); border-radius:8px; padding:6px 10px; white-space:nowrap; }
+a.bouton:hover { border-color:var(--accent); }
 main { flex:1; display:flex; min-height:0; }
 
 #rubriques { width:240px; overflow:auto; padding:10px; background:var(--panel);
@@ -101,6 +112,7 @@ main { flex:1; display:flex; min-height:0; }
   <h1>cdp-viewer</h1>
   <select id="classe" title="Classe"></select>
   <input id="recherche" class="grow" placeholder="Rechercher un document&hellip;">
+  <a id="calendrier" class="bouton" href="#" title="Devoirs surveillés de la classe (export .ics)">Calendrier</a>
   <button id="theme" title="Mode sombre"></button>
 </header>
 <main>
@@ -392,6 +404,7 @@ async function naviguer() {
     return;
   }
   if (elClasse.value !== classe) elClasse.value = classe;
+  document.getElementById("calendrier").href = "/calendrier/" + encodeURIComponent(classe);
   elRecherche.value = "";
   if (hash.endsWith("/__recents__")) {
     rendreRubriques(arbre, {__recents__: true, chemin: arbre.chemin});
@@ -718,6 +731,9 @@ MESSAGES_ERREUR = {
               "Ce chemin sort du dossier des cours autorisé."),
     "introuvable": ("Page introuvable",
                     "Cette adresse ne correspond à aucune page du viewer."),
+    "agenda": ("Agenda indisponible",
+               "Aucun agenda n'a été récupéré pour cette classe. Lancez "
+               "cdp_scraper.py sans --sans-agenda pour le récupérer."),
 }
 
 
@@ -728,6 +744,191 @@ def page_erreur(code: int, contexte: str) -> bytes:
             .replace("__CODE__", str(code))
             .replace("__TITRE__", html.escape(titre))
             .replace("__MESSAGE__", html.escape(message)))
+    return page.encode("utf-8")
+
+
+PAGE_CALENDRIER = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendrier — __CLASSE__</title>
+<style>
+:root { --bg:#f7f7f8; --panel:#fff; --txt:#1d1d1f; --muted:#6b6b70; --border:#e3e3e6; --accent:#2563eb; }
+[data-theme="dark"] { --bg:#1d1d1f; --panel:#232326; --txt:#f2f2f3; --muted:#9a9a9e; --border:#3a3a3d; --accent:#5b8def; }
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 system-ui,sans-serif;color:var(--txt);background:var(--bg)}
+header{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--border);
+  padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header .titre{font-weight:600;flex:1}
+.bascule{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.bascule button{font:inherit;border:none;background:var(--bg);color:var(--txt);
+  padding:6px 10px;cursor:pointer}
+.bascule button.actif{background:var(--accent);color:#fff}
+a.bouton{font:inherit;color:var(--txt);background:var(--bg);text-decoration:none;
+  border:1px solid var(--border);border-radius:8px;padding:6px 10px}
+a.bouton:hover{border-color:var(--accent)}
+main{max-width:40rem;margin:0 auto;padding:16px}
+article{border-bottom:1px solid var(--border);padding:10px 0}
+article h3{margin:0 0 2px;font-size:14px}
+article p{margin:2px 0 0;color:var(--muted)}
+.vide{color:var(--muted);padding:24px 0}
+#mois-entete{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:10px}
+#mois-entete button{font:inherit;border:1px solid var(--border);background:var(--bg);
+  color:var(--txt);border-radius:8px;padding:4px 10px;cursor:pointer}
+#mois-entete button:hover{border-color:var(--accent)}
+#mois-titre{font-weight:600;min-width:11em;text-align:center}
+#grille-mois{width:100%;border-collapse:collapse;table-layout:fixed}
+#grille-mois th{font-weight:600;font-size:12px;color:var(--muted);padding:4px;text-align:center}
+#grille-mois td{border:1px solid var(--border);vertical-align:top;height:5em;padding:2px;
+  font-size:12px;overflow:hidden}
+#grille-mois .jour{color:var(--muted)}
+#grille-mois p.evnmt{margin:2px 0 0;padding:1px 4px;background:var(--accent);color:#fff;
+  border-radius:4px;font-size:11px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+</style>
+</head>
+<body>
+<header>
+  <span class="titre">Calendrier — __CLASSE__</span>
+  <div class="bascule">
+    <button id="vue-liste" class="actif">Liste</button>
+    <button id="vue-mois">Mois</button>
+  </div>
+  <a class="bouton" href="__TELECHARGER__">Télécharger le .ics</a>
+  <a class="bouton" href="/">Retour</a>
+</header>
+<main>
+<section id="liste">
+__EVENEMENTS__
+</section>
+<section id="mois" hidden>
+  <div id="mois-entete">
+    <button id="mois-prec" title="Mois précédent">&laquo;</button>
+    <span id="mois-titre"></span>
+    <button id="mois-suiv" title="Mois suivant">&raquo;</button>
+  </div>
+  <table id="grille-mois">
+    <thead><tr><th>Lun</th><th>Mar</th><th>Mer</th><th>Jeu</th><th>Ven</th><th>Sam</th><th>Dim</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
+</main>
+<script>
+if (localStorage.getItem("cdp-theme") === "dark")
+  document.documentElement.setAttribute("data-theme", "dark");
+
+const EVENEMENTS = __EVENEMENTS_JSON__;
+
+function cleJour(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")
+       + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+const parJour = {};
+EVENEMENTS.forEach(ev => {
+  const debut = new Date(ev.debut);
+  const fin = ev.fin ? new Date(ev.fin) : debut;
+  let d = new Date(debut.getFullYear(), debut.getMonth(), debut.getDate());
+  const dFin = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate());
+  while (d <= dFin) {
+    const cle = cleJour(d);
+    (parJour[cle] = parJour[cle] || []).push(ev.resume);
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  }
+});
+
+const NOMS_MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+                   "août", "septembre", "octobre", "novembre", "décembre"];
+let moisCourant = EVENEMENTS.length ? new Date(EVENEMENTS[0].debut) : new Date();
+moisCourant = new Date(moisCourant.getFullYear(), moisCourant.getMonth(), 1);
+
+function rendreMois() {
+  document.getElementById("mois-titre").textContent =
+    NOMS_MOIS[moisCourant.getMonth()] + " " + moisCourant.getFullYear();
+  const premier = new Date(moisCourant.getFullYear(), moisCourant.getMonth(), 1);
+  const decalage = (premier.getDay() + 6) % 7;   // 0 = lundi
+  const nbJours = new Date(moisCourant.getFullYear(), moisCourant.getMonth() + 1, 0).getDate();
+  const corps = document.querySelector("#grille-mois tbody");
+  corps.innerHTML = "";
+  let ligne = document.createElement("tr");
+  for (let i = 0; i < decalage; i++) ligne.appendChild(document.createElement("td"));
+  for (let jour = 1; jour <= nbJours; jour++) {
+    if (ligne.children.length === 7) { corps.appendChild(ligne); ligne = document.createElement("tr"); }
+    const cle = cleJour(new Date(moisCourant.getFullYear(), moisCourant.getMonth(), jour));
+    const td = document.createElement("td");
+    const numero = document.createElement("span");
+    numero.className = "jour"; numero.textContent = jour;
+    td.appendChild(numero);
+    (parJour[cle] || []).forEach(resume => {
+      const p = document.createElement("p");
+      p.className = "evnmt"; p.textContent = resume; p.title = resume;
+      td.appendChild(p);
+    });
+    ligne.appendChild(td);
+  }
+  while (ligne.children.length < 7) ligne.appendChild(document.createElement("td"));
+  corps.appendChild(ligne);
+}
+
+document.getElementById("mois-prec").onclick = () => {
+  moisCourant = new Date(moisCourant.getFullYear(), moisCourant.getMonth() - 1, 1);
+  rendreMois();
+};
+document.getElementById("mois-suiv").onclick = () => {
+  moisCourant = new Date(moisCourant.getFullYear(), moisCourant.getMonth() + 1, 1);
+  rendreMois();
+};
+
+function basculerVue(vue) {
+  document.getElementById("liste").hidden = vue !== "liste";
+  document.getElementById("mois").hidden = vue !== "mois";
+  document.getElementById("vue-liste").classList.toggle("actif", vue === "liste");
+  document.getElementById("vue-mois").classList.toggle("actif", vue === "mois");
+}
+document.getElementById("vue-liste").onclick = () => basculerVue("liste");
+document.getElementById("vue-mois").onclick = () => basculerVue("mois");
+
+rendreMois();
+</script>
+</body>
+</html>"""
+
+_JOURS_FR = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+_MOIS_FR = ["", "janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+            "août", "septembre", "octobre", "novembre", "décembre"]
+
+
+def _formater_date_fr(dt: datetime, avec_heure: bool) -> str:
+    texte = f"{_JOURS_FR[dt.weekday()]} {dt.day} {_MOIS_FR[dt.month]} {dt.year}"
+    if avec_heure:
+        texte += f" à {dt.hour}h" + (f"{dt.minute:02d}" if dt.minute else "")
+    return texte
+
+
+def page_calendrier(classe: str, evenements: list) -> bytes:
+    if evenements:
+        blocs = []
+        for ev in sorted(evenements, key=lambda e: e["debut"]):
+            date_txt = _formater_date_fr(ev["debut"], avec_heure=not ev["journee_entiere"])
+            blocs.append(
+                f'<article><h3>{html.escape(date_txt)}</h3>'
+                f'<p>{html.escape(ev["resume"])}</p></article>'
+            )
+        corps = "\n".join(blocs)
+    else:
+        corps = '<div class="vide">Aucun devoir surveillé trouvé pour cette classe.</div>'
+    donnees_js = json.dumps([
+        {"resume": ev["resume"], "debut": ev["debut"].isoformat(),
+         "fin": ev["fin"].isoformat() if ev["fin"] else None}
+        for ev in evenements
+    ])
+    enc = urllib.parse.quote(classe)
+    page = (PAGE_CALENDRIER
+            .replace("__CLASSE__", html.escape(classe))
+            .replace("__TELECHARGER__", f"/calendrier/{enc}/telecharger")
+            .replace("__EVENEMENTS__", corps)
+            .replace("__EVENEMENTS_JSON__", donnees_js))
     return page.encode("utf-8")
 
 
@@ -1039,7 +1240,7 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
     """Sert la page, l'API JSON et les fichiers. `self.server.racine` = racine."""
 
     def _envoyer_octets(self, code: int, octets: bytes, content_type: str,
-                        cache: bool = True):
+                        cache: bool = True, entetes: dict = None):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(octets)))
@@ -1047,6 +1248,8 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
             # Évite qu'un navigateur garde une ancienne version de la page/API
             # après une mise à jour du viewer (cause de comportements « périmés »).
             self.send_header("Cache-Control", "no-store")
+        for nom, valeur in (entetes or {}).items():
+            self.send_header(nom, valeur)
         self.end_headers()
         self.wfile.write(octets)
 
@@ -1080,6 +1283,30 @@ class GestionnaireCDP(BaseHTTPRequestHandler):
                 self._erreur(404, "classe")
                 return
             self._envoyer_json(200, arbre)
+            return
+
+        if chemin.startswith("/calendrier/"):
+            rel = urllib.parse.unquote(chemin[len("/calendrier/"):])
+            telechargement = rel.endswith("/telecharger")
+            classe = rel[:-len("/telecharger")] if telechargement else rel
+            base = resoudre_dans_racine(racine, classe)
+            if base is None or not base.is_dir():
+                self._erreur(404, "classe")
+                return
+            cible = base / ".agenda.ics"
+            if not cible.is_file():
+                self._erreur(404, "agenda")
+                return
+            contenu = cible.read_text(encoding="utf-8")
+            if telechargement:
+                entetes = {"Content-Disposition": f'attachment; filename="agenda-{classe}.ics"'}
+                self._envoyer_octets(200, contenu.encode("utf-8"),
+                                     "text/calendar; charset=utf-8", cache=False,
+                                     entetes=entetes)
+                return
+            evenements = cdp_agenda.lire_ics(contenu)
+            self._envoyer_octets(200, page_calendrier(classe, evenements),
+                                 "text/html; charset=utf-8", cache=False)
             return
 
         if chemin.startswith("/ouvrir/"):                 # .ggb -> GeoGebra en ligne
@@ -1232,6 +1459,8 @@ def main():
                    help="Port d'écoute (défaut : 8000)")
     p.add_argument("--no-browser", action="store_true",
                    help="Ne pas ouvrir le navigateur automatiquement")
+    p.add_argument("--no-verif-maj", action="store_true",
+                   help="Ne pas vérifier si une nouvelle version est disponible")
     p.add_argument("--version", action="version",
                    version=f"cdp-viewer {__version__}")
     args = p.parse_args()
@@ -1245,6 +1474,9 @@ def main():
     serveur = creer_serveur(racine, args.port)
     url = f"http://127.0.0.1:{serveur.server_address[1]}"
     print(f"cdp-viewer en écoute sur {url}  (Ctrl+C pour arrêter)")
+    if not args.no_verif_maj:
+        cdp_maj.proposer_maj(__version__, cdp_maj.chemin_maj(), DEPOT_SLUG,
+                              Path(__file__).resolve().parent, _tty)
     if not args.no_browser:
         webbrowser.open(url)
     try:

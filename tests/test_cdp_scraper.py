@@ -4,6 +4,7 @@ import os
 import tempfile
 from unittest import mock
 from pathlib import Path
+from datetime import datetime
 
 # Les tests vivent dans tests/ ; on ajoute la racine du projet au sys.path pour
 # pouvoir importer cdp_scraper quel que soit le dossier depuis lequel on lance
@@ -48,7 +49,15 @@ class TestVersion(unittest.TestCase):
         self.assertEqual(cdp_scraper.__version__, cdp_viewer.__version__)
 
     def test_version_attendue(self):
-        self.assertEqual(cdp_scraper.__version__, "1.5.0")
+        self.assertEqual(cdp_scraper.__version__, "1.7.0")
+
+
+class TestArgsAgenda(unittest.TestCase):
+    def test_flag_present(self):
+        self.assertTrue(cdp_scraper.parse_args(["--sans-agenda"]).sans_agenda)
+
+    def test_flag_absent_par_defaut(self):
+        self.assertFalse(cdp_scraper.parse_args([]).sans_agenda)
 
 
 class TestAnalyserPage(unittest.TestCase):
@@ -455,6 +464,45 @@ class TestArgsCoffre(unittest.TestCase):
         self.assertTrue(args.coffre_changer_mdp)
 
 
+class TestArgsVerifMaj(unittest.TestCase):
+    def test_flag_present(self):
+        args = cdp_scraper.parse_args(["--sans-verif-maj"])
+        self.assertTrue(args.sans_verif_maj)
+
+    def test_flag_absent_par_defaut(self):
+        args = cdp_scraper.parse_args([])
+        self.assertFalse(args.sans_verif_maj)
+
+
+class TestVerifMajScraper(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.chemin_cfg = Path(self.tmp.name) / "config.json"
+        cdp_config.enregistrer(self.chemin_cfg, cdp_config._vide())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, argv):
+        with mock.patch.object(cdp_scraper, "parse_args",
+                               return_value=cdp_scraper.parse_args(argv + ["--config-lister"])), \
+             mock.patch.object(cdp_scraper, "verifier_accord"), \
+             mock.patch.object(cdp_scraper.cdp_config, "chemin_config",
+                               return_value=self.chemin_cfg), \
+             mock.patch.object(cdp_scraper.cdp_maj, "proposer_maj") as proposer_mock:
+            cdp_scraper.main()
+        return proposer_mock
+
+    def test_appelee_par_defaut(self):
+        proposer_mock = self._run([])
+        proposer_mock.assert_called_once()
+        self.assertEqual(proposer_mock.call_args[0][0], cdp_scraper.__version__)
+
+    def test_sans_verif_maj_desactive(self):
+        proposer_mock = self._run(["--sans-verif-maj"])
+        proposer_mock.assert_not_called()
+
+
 class TestIndicesMenu(unittest.TestCase):
     def test_vide_tous(self):
         self.assertEqual(cdp_scraper._indices_menu("", 3), [0, 1, 2])
@@ -484,7 +532,7 @@ class TestTraiterClasse(unittest.TestCase):
 
     def _args(self):
         return types.SimpleNamespace(reprise=False, complet=False, sans_colles=True,
-                                     profondeur=None, delai=0.0)
+                                     sans_agenda=True, profondeur=None, delai=0.0)
 
     def test_connexion_echouee_resume_ko(self):
         cfg = {"nom": "mpsi", "url": "https://x/mpsi", "login": "a", "dossier": self.dossier}
@@ -519,6 +567,65 @@ class TestTraiterClasse(unittest.TestCase):
             resume = cdp_scraper.traiter_classe(cfg, self._args(), "secret", True)
         self.assertFalse(resume["ok"])
         self.assertEqual(resume["nom"], "mpsi")
+
+
+class TestTraiterClasseAgenda(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dossier = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _args(self, sans_agenda):
+        return types.SimpleNamespace(reprise=False, complet=False, sans_colles=True,
+                                     sans_agenda=sans_agenda, profondeur=None, delai=0.0)
+
+    def _cfg(self):
+        return {"nom": "mpsi", "url": "https://x/mpsi", "login": "a", "dossier": self.dossier}
+
+    def _cible(self):
+        return Path(self.dossier) / "mpsi" / ".agenda.ics"
+
+    def test_ds_trouves_ecrit_agenda_ics(self):
+        ev = {"id": "1", "type": "Devoir surveillé", "matiere": "Mathématiques",
+              "debut": datetime(2026, 9, 12, 8, 0), "fin": datetime(2026, 9, 12, 8, 0),
+              "journee_entiere": False, "texte": "Texte."}
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(True, "ok")), \
+             mock.patch.object(cdp_scraper, "crawler", return_value=[]), \
+             mock.patch.object(cdp_scraper.cdp_agenda, "recuperer_agenda", return_value=[ev]):
+            cdp_scraper.traiter_classe(self._cfg(), self._args(False), "secret", False)
+        self.assertTrue(self._cible().is_file())
+        self.assertIn("Devoir surveillé en Mathématiques", self._cible().read_text(encoding="utf-8"))
+
+    def test_sans_agenda_ne_recupere_rien(self):
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(True, "ok")), \
+             mock.patch.object(cdp_scraper, "crawler", return_value=[]), \
+             mock.patch.object(cdp_scraper.cdp_agenda, "recuperer_agenda") as recup_mock:
+            cdp_scraper.traiter_classe(self._cfg(), self._args(True), "secret", False)
+        recup_mock.assert_not_called()
+        self.assertFalse(self._cible().is_file())
+
+    def test_aucun_ds_trouve_pas_de_fichier(self):
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(True, "ok")), \
+             mock.patch.object(cdp_scraper, "crawler", return_value=[]), \
+             mock.patch.object(cdp_scraper.cdp_agenda, "recuperer_agenda", return_value=[]):
+            cdp_scraper.traiter_classe(self._cfg(), self._args(False), "secret", False)
+        self.assertFalse(self._cible().is_file())
+
+    def test_simulation_n_ecrit_rien(self):
+        ev = {"id": "1", "type": "Devoir surveillé", "matiere": "",
+              "debut": datetime(2026, 9, 12, 0, 0), "fin": None,
+              "journee_entiere": True, "texte": ""}
+        with mock.patch.object(cdp_scraper, "creer_session", return_value=object()), \
+             mock.patch.object(cdp_scraper, "connexion", return_value=(True, "ok")), \
+             mock.patch.object(cdp_scraper, "crawler", return_value=[]), \
+             mock.patch.object(cdp_scraper.cdp_agenda, "recuperer_agenda", return_value=[ev]):
+            cdp_scraper.traiter_classe(self._cfg(), self._args(False), "secret", True)
+        self.assertFalse(self._cible().is_file())
 
 
 class TestMainSelection(unittest.TestCase):

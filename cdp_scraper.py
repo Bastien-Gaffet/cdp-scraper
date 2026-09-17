@@ -34,11 +34,14 @@ from datetime import datetime
 import cdp_manifeste
 import cdp_config
 import cdp_coffre
+import cdp_maj
+import cdp_agenda
 from urllib.parse import urljoin, urlsplit, unquote
 
-__version__ = "1.5.0"
+__version__ = "1.7.0"
 # URL du dépôt, reprise dans le User-Agent (transparence vis-à-vis du serveur).
 DEPOT = "https://github.com/Bastien-Gaffet/cdp-scraper"
+DEPOT_SLUG = "Bastien-Gaffet/cdp-scraper"
 KOFI = "https://ko-fi.com/G2G71YFHWX"
 
 # Fichier marquant que l'utilisateur a accepté les conditions d'usage.
@@ -607,8 +610,12 @@ AVERTISSEMENT = """\
  uniquement à la connexion directe au site. Si vous activez volontairement
  le coffre chiffré, votre mot de passe est chiffré localement (AES-256-GCM,
  clé dérivée d'un mot de passe maître que vous seul connaissez) et ne
- quitte jamais votre machine. Dans tous les cas : aucune collecte, aucun
- envoi vers un serveur externe au vôtre (RGPD).
+ quitte jamais votre machine. Une fois par jour au plus, le script vérifie
+ auprès de GitHub si une nouvelle version existe, et peut proposer de
+ mettre à jour les fichiers du projet sur votre confirmation explicite
+ (jamais cours_cdp/ ni le coffre). Aucune donnée personnelle n'y transite ;
+ désactivable avec --sans-verif-maj. En dehors de ces cas : aucune collecte,
+ aucun envoi vers un serveur externe au vôtre (RGPD).
 
 └────────────────────────────────────────────────────────────────────┘
 """
@@ -679,6 +686,8 @@ Exemples :
                    help="Pause entre requêtes pour ménager le serveur (défaut : 0)")
     p.add_argument("--sans-colles", action="store_true",
                    help="Ne pas récupérer les programmes de colles")
+    p.add_argument("--sans-agenda", action="store_true",
+                   help="Ne pas récupérer les devoirs surveillés de l'agenda (export .ics)")
     p.add_argument("--accepter-conditions", action="store_true",
                    help="Accepter les conditions d'usage sans invite (1er lancement)")
     synchro = p.add_mutually_exclusive_group()
@@ -707,6 +716,8 @@ Exemples :
                    help="Afficher les classes ayant un mot de passe dans le coffre puis quitter")
     p.add_argument("--coffre-changer-mdp", action="store_true",
                    help="Changer le mot de passe maître du coffre chiffré puis quitter")
+    p.add_argument("--sans-verif-maj", action="store_true",
+                   help="Ne pas vérifier si une nouvelle version est disponible")
     p.add_argument("--version", action="version", version=f"cdp-scraper {__version__}")
     return p.parse_args(argv)
 
@@ -814,6 +825,16 @@ def traiter_classe(cfg: dict, args, mdp: str, simulation: bool) -> dict:
                     ajoutes += 1
             documents = list(fusion.values())
             print(dim(f"  + {ajoutes} élément(s) de programmes de colles"))
+
+    if not args.sans_agenda:
+        evenements = cdp_agenda.filtrer_ds(
+            cdp_agenda.recuperer_agenda(session, url, delai=args.delai))
+        if evenements:
+            print(dim(f"  + {len(evenements)} devoir(s) surveillé(s) trouvé(s) dans l'agenda"))
+            if not simulation:
+                dossier.mkdir(parents=True, exist_ok=True)
+                contenu = cdp_agenda.generer_ics(evenements, nom_classe)
+                _ecrire_atomique(dossier / ".agenda.ics", contenu.encode("utf-8"))
 
     if not documents:
         print(jaune("\nAucun document trouvé."))
@@ -979,6 +1000,10 @@ def main():
 
     print(gras(cyan("\n══════════ Scraper cahier-de-prepa.fr ══════════\n")))
     print(dim(f"  Développé par Bastien Gaffet — soutenir : {KOFI}\n"))
+
+    if not args.sans_verif_maj:
+        cdp_maj.proposer_maj(__version__, cdp_maj.chemin_maj(), DEPOT_SLUG,
+                              Path(__file__).resolve().parent, _tty)
 
     # Conditions d'usage (affichées + acceptées une seule fois).
     verifier_accord(args.accepter_conditions)
