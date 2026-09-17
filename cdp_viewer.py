@@ -63,6 +63,9 @@ select, input, button { font:inherit; color:var(--txt); background:var(--bg);
   border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
 button { cursor:pointer; }
 a { color:inherit; text-decoration:none; }
+a.bouton { display:inline-block; font:inherit; color:var(--txt); background:var(--bg);
+  border:1px solid var(--border); border-radius:8px; padding:6px 10px; white-space:nowrap; }
+a.bouton:hover { border-color:var(--accent); }
 main { flex:1; display:flex; min-height:0; }
 
 #rubriques { width:240px; overflow:auto; padding:10px; background:var(--panel);
@@ -109,6 +112,7 @@ main { flex:1; display:flex; min-height:0; }
   <h1>cdp-viewer</h1>
   <select id="classe" title="Classe"></select>
   <input id="recherche" class="grow" placeholder="Rechercher un document&hellip;">
+  <a id="calendrier" class="bouton" href="#" title="Devoirs surveillés de la classe (export .ics)">Calendrier</a>
   <button id="theme" title="Mode sombre"></button>
 </header>
 <main>
@@ -400,6 +404,7 @@ async function naviguer() {
     return;
   }
   if (elClasse.value !== classe) elClasse.value = classe;
+  document.getElementById("calendrier").href = "/calendrier/" + encodeURIComponent(classe);
   elRecherche.value = "";
   if (hash.endsWith("/__recents__")) {
     rendreRubriques(arbre, {__recents__: true, chemin: arbre.chemin});
